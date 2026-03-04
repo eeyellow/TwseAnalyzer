@@ -36,4 +36,4 @@
 - **目標框架**: .NET 10
 - **專案結構**: TWSE.Core（核心邏輯）、TWSE.Cli（CLI 入口）、TWSE.Tests（單元測試）
 - **外部 API 依賴**: TWSE OpenAPI（免費、無需 API Key）、Yahoo Finance（免費、有 rate limiting）
-- **本地儲存**: SQLite 資料庫存放於 `data/` 目錄
+- **本地儲存**: SQLite 資料庫存放於根目錄的 `data/twse.db` 檔案

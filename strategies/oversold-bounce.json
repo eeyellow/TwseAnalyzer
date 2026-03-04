@@ -1,0 +1,8 @@
+{
+    "screen": [
+        "RSI(14) less_than 30",
+        "Close greater_than Open"
+    ],
+    "sortBy": "RSI(14)",
+    "limit": 20
+}

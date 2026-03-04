@@ -1,0 +1,9 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/TWSE.Cli/TWSE.Cli.csproj" />
+    <Project Path="src/TWSE.Core/TWSE.Core.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/TWSE.Tests/TWSE.Tests.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,14 @@
+{
+    "backtest": {
+        "initialCapital": 1000000,
+        "positionSize": 100000,
+        "commissionRate": 0.001425,
+        "taxRate": 0.003
+    },
+    "entry": [
+        "SMA(5) cross_above SMA(20)"
+    ],
+    "exit": [
+        "SMA(5) cross_below SMA(20)"
+    ]
+}

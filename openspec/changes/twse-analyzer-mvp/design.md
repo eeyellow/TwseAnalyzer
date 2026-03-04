@@ -108,7 +108,7 @@ IConditionEvaluator
 |------|---------|
 | Yahoo Finance API 被封鎖或改版 | 資料抓取層做抽象（`IDataFetcher`），可替換為其他資料源；本地快取減少 API 呼叫 |
 | 首次下載 ~1,700 支股票耗時長 | 顯示進度條；支援中斷續傳（記錄已完成的股票）|
-| TWSE OpenAPI 回傳格式變更 | 用專門的 `TwseFetcher` 隔離，變更只影響單一class |
+| TWSE ISIN 網頁結構變更 | 用專門的 `TwseFetcher` 隔離，變更只影響單一class |
 | Skender.Stock.Indicators 套件不支援某些特殊指標 | `IIndicatorService` 抽象允許混合使用自定義計算 |
 | .NET 10 preview 穩定性 | 如果遇到嚴重問題可降級到 .NET 9 |
 | SQLite 單檔在大量寫入時效能 | 使用 WAL mode、批次 INSERT、適當 index |
