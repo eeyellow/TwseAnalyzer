@@ -1,5 +1,6 @@
 using TWSE.Core.Models;
 using YahooQuotesApi;
+using NodaTime;
 
 namespace TWSE.Core.Data;
 
@@ -13,7 +14,7 @@ public class YahooFetcher : IYahooFetcher
     public YahooFetcher()
     {
         _yahooQuotes = new YahooQuotesBuilder()
-            // .WithHistoryParameter(Frequency.Daily)
+            .WithHistoryStartDate(NodaTime.Instant.FromUtc(1990, 1, 1, 0, 0))
             .Build();
     }
 

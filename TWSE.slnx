@@ -2,6 +2,7 @@
   <Folder Name="/src/">
     <Project Path="src/TWSE.Cli/TWSE.Cli.csproj" />
     <Project Path="src/TWSE.Core/TWSE.Core.csproj" />
+    <Project Path="src/TWSE.Web/TWSE.Web.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/TWSE.Tests/TWSE.Tests.csproj" />

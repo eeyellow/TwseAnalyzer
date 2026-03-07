@@ -43,11 +43,11 @@ TWSE Analyzer 是一個專為台股盤後技術分析打造的 .NET 10 命令列
 
 ### 1. 初始化資料庫與歷史行情 (init)
 
-首次啟動必備，它會建立 SQLite 資料庫，從證交所 ISIN 網頁抓取所有上市櫃「股票」及「ETF」的清單，接著往回從 Yahoo Finance 抓取指定年份的歷史 K 線資料。
+首次啟動必備，它會建立 SQLite 資料庫，從證交所 ISIN 網頁抓取所有上市櫃「股票」及「ETF」的清單，接著往回從 Yahoo Finance 抓取所有的歷史 K 線資料。
 
 ```bash
-# 預設會往回抓取數年的資料，可透過 --years 參數控制
-dotnet run --project src/TWSE.Cli -- init --years 5
+# 預設會往回抓取所有的歷史資料
+dotnet run --project src/TWSE.Cli -- init
 ```
 
 ### 2. 更新增量行情 (update)

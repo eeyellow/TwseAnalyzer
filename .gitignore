@@ -499,3 +499,4 @@ test_yahoo.cs
 .openspec/
 
 !src/TWSE.Core/Data
+src/TWSE.Web/wwwroot
