@@ -44,7 +44,7 @@ public class BacktestEngine : IBacktestEngine
         for (int i = 0; i < filteredHistory.Count - 1; i++) // Cannot evaluate on the last day since execution is next day
         {
             // Calculate daily return for Sharpe Ratio later
-            decimal dailyReturn = (currentCapital - previousCapital) / previousCapital;
+            decimal dailyReturn = previousCapital != 0 ? (currentCapital - previousCapital) / previousCapital : 0m;
             dailyReturns.Add(dailyReturn);
             previousCapital = currentCapital;
 
@@ -63,6 +63,8 @@ public class BacktestEngine : IBacktestEngine
                 {
                     // Execute entry
                     decimal price = nextDay.Open;
+                    if (price <= 0) continue; // Skip if price data is invalid
+
                     int maxShares = (int)(config.Backtest.PositionSize / price);
                     int quantity = (maxShares / 1000) * 1000; // Round down to multiple of 1000
 
@@ -88,6 +90,8 @@ public class BacktestEngine : IBacktestEngine
                 {
                     // Execute exit
                     decimal price = nextDay.Open;
+                    if (price <= 0) continue; // Skip if price data is invalid
+
                     openTrade.SellDate = nextDay.Date;
                     openTrade.SellPrice = price;
 

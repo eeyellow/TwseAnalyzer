@@ -1,0 +1,28 @@
+{
+    "screen": [
+        "K(45) greater_than D(45)",
+        "D(45) greater_than 30",
+        "SMA(25) cross_above SMA(50)",
+        "Close greater_than SMA(25)"
+    ],
+    "backtest": {
+        "startDate": "2023-01-01",
+        "endDate": "2024-12-31",
+        "initialCapital": 100000,
+        "positionSize": 100000,
+        "commissionRate": 0.001425,
+        "taxRate": 0.003
+    },
+    "entry": [
+        "K(45) greater_than D(45)",
+        "D(45) greater_than 30",
+        "SMA(25) cross_above SMA(50)",
+        "Close greater_than SMA(25)"
+    ],
+    "exit": [
+        "K(45) cross_below D(45)",
+        "Close less_than SMA(25)"
+    ],
+    "sortBy": "Volume",
+    "limit": 50
+}

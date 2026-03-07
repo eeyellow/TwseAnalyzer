@@ -1,0 +1,31 @@
+{
+    "screen": [
+        "SMA(3) greater_than SMA(3)[1]",
+        "SMA(18) greater_than SMA(18)[1]",
+        "Volume greater_than Volume[1]",
+        "Volume greater_than Volume[2]",
+        "Volume greater_than Volume[3]",
+        "Close greater_than Open"
+    ],
+    "backtest": {
+        "startDate": "2023-01-01",
+        "endDate": "2024-12-31",
+        "initialCapital": 100000,
+        "positionSize": 100000,
+        "commissionRate": 0.001425,
+        "taxRate": 0.003
+    },
+    "entry": [
+        "SMA(3) greater_than SMA(3)[1]",
+        "SMA(18) greater_than SMA(18)[1]",
+        "Volume greater_than Volume[1]",
+        "Volume greater_than Volume[2]",
+        "Volume greater_than Volume[3]",
+        "Close greater_than Open"
+    ],
+    "exit": [
+        "SMA(3) less_than SMA(3)[1]"
+    ],
+    "sortBy": "Volume",
+    "limit": 50
+}

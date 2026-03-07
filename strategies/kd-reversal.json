@@ -1,0 +1,27 @@
+{
+    "screen": [
+        "K(9) less_than 20",
+        "D(9) less_than 20",
+        "K(9) cross_above D(9)"
+    ],
+    "backtest": {
+        "startDate": "2023-01-01",
+        "endDate": "2024-12-31",
+        "initialCapital": 100000,
+        "positionSize": 100000,
+        "commissionRate": 0.001425,
+        "taxRate": 0.003
+    },
+    "entry": [
+        "K(9) less_than 20",
+        "D(9) less_than 20",
+        "K(9) cross_above D(9)"
+    ],
+    "exit": [
+        "K(9) greater_than 80",
+        "D(9) greater_than 80",
+        "K(9) cross_below D(9)"
+    ],
+    "sortBy": "Volume",
+    "limit": 50
+}

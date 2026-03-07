@@ -90,6 +90,23 @@ public class JsonConditionEvaluator : IConditionEvaluator
     // For entire series evaluation (cross over)
     private List<double?> GetGlobalSeries(string operand, IReadOnlyList<OHLCV> history)
     {
+        int offset = ExtractOffset(ref operand);
+        var series = GetGlobalSeriesInternal(operand, history);
+        
+        if (offset > 0)
+        {
+            var shifted = new List<double?>(series.Count);
+            for (int i = 0; i < series.Count; i++)
+            {
+                shifted.Add(i >= offset ? series[i - offset] : null);
+            }
+            return shifted;
+        }
+        return series;
+    }
+
+    private List<double?> GetGlobalSeriesInternal(string operand, IReadOnlyList<OHLCV> history)
+    {
         if (double.TryParse(operand, out var fixedVal))
         {
             return Enumerable.Repeat((double?)fixedVal, history.Count).ToList();
@@ -109,11 +126,34 @@ public class JsonConditionEvaluator : IConditionEvaluator
              return history.Select((h, i) => i < sma.Count ? sma[i].Sma : null).ToList();
         }
 
+        if (operand.StartsWith("K(", StringComparison.OrdinalIgnoreCase))
+        {
+            var period = ExtractPeriod(operand);
+            var kdList = _indicatorService.CalculateKd(history, period).ToList();
+            return history.Select((h, i) => i < kdList.Count ? kdList[i].Oscillator : null).ToList();
+        }
+
+        if (operand.StartsWith("D(", StringComparison.OrdinalIgnoreCase))
+        {
+            var period = ExtractPeriod(operand);
+            var kdList = _indicatorService.CalculateKd(history, period).ToList();
+            return history.Select((h, i) => i < kdList.Count ? kdList[i].Signal : null).ToList();
+        }
+
         // Add more indicators as needed for MVP...
         return history.Select(h => (double?)h.Close).ToList(); // Fallback to Close price
     }
 
     private double? GetValue(string operand, IReadOnlyList<OHLCV> history, int index)
+    {
+        int offset = ExtractOffset(ref operand);
+        int targetIndex = index - offset;
+        if (targetIndex < 0) return null;
+        
+        return GetValueInternal(operand, history, targetIndex);
+    }
+
+    private double? GetValueInternal(string operand, IReadOnlyList<OHLCV> history, int index)
     {
         if (double.TryParse(operand, out var fixedVal)) return fixedVal;
 
@@ -135,7 +175,32 @@ public class JsonConditionEvaluator : IConditionEvaluator
             if (index < smaList.Count) return smaList[index].Sma;
         }
 
+        if (operand.StartsWith("K(", StringComparison.OrdinalIgnoreCase))
+        {
+            var period = ExtractPeriod(operand);
+            var kdList = _indicatorService.CalculateKd(history, period).ToList();
+            if (index < kdList.Count) return kdList[index].Oscillator;
+        }
+
+        if (operand.StartsWith("D(", StringComparison.OrdinalIgnoreCase))
+        {
+            var period = ExtractPeriod(operand);
+            var kdList = _indicatorService.CalculateKd(history, period).ToList();
+            if (index < kdList.Count) return kdList[index].Signal;
+        }
+
         return null;
+    }
+
+    private int ExtractOffset(ref string operand)
+    {
+        var match = Regex.Match(operand, @"\[(\d+)\]$");
+        if (match.Success)
+        {
+            operand = operand.Substring(0, match.Index);
+            if (int.TryParse(match.Groups[1].Value, out var val)) return val;
+        }
+        return 0;
     }
 
     private int ExtractPeriod(string operand)

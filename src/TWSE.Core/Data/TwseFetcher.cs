@@ -58,15 +58,13 @@ public class TwseFetcher : ITwseFetcher
                 var codeAndName = tds[0].InnerText.Trim();
                 var parts = codeAndName.Split('\u3000', 2, StringSplitOptions.RemoveEmptyEntries);
                 
-                if (parts.Length == 2)
+                
+                results.Add(new StockInfo
                 {
-                    results.Add(new StockInfo
-                    {
-                        Code = parts[0].Trim(),
-                        Name = parts[1].Trim(),
-                        Industry = tds[4].InnerText.Trim()
-                    });
-                }
+                    Code = parts[0].Trim(),
+                    Name = parts.Length > 1 ? parts[1].Trim() : string.Empty,
+                    Industry = tds[4].InnerText.Trim()
+                });
             }
         }
         

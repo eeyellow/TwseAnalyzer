@@ -20,7 +20,8 @@ public class BacktestCommandFactory
     public Command CreateCommand()
     {
         var command = new Command("backtest", "Run a backtest using a strategy file.");
-        var strategyOption = new Option<string>("--strategy", "Path to the strategy JSON file.") { IsRequired = true };
+        var strategyOption = new Option<string[]>("--strategy", "Path to the strategy JSON file(s).") { IsRequired = true };
+        strategyOption.AllowMultipleArgumentsPerToken = true;
         var stockOption = new Option<string>("--stock", "Specific stock code to backtest on.");
         var allOption = new Option<bool>("--all", "Backtest on all listed stocks.");
         var topOption = new Option<int>("--top", () => 20, "Number of top results to show when backtesting all stocks.");
@@ -30,17 +31,43 @@ public class BacktestCommandFactory
         command.AddOption(allOption);
         command.AddOption(topOption);
 
-        command.SetHandler(async (string strategyFile, string? stockOptionValue, bool allOptionValue, int topOptionValue) =>
+        command.SetHandler(async (string[] strategyFiles, string? stockOptionValue, bool allOptionValue, int topOptionValue) =>
         {
-            if (!File.Exists(strategyFile))
+            var aggregatedConfig = new StrategyConfig();
+            bool isFirstValidConfig = true;
+
+            foreach (var strategyFile in strategyFiles)
             {
-                AnsiConsole.MarkupLine($"[red]Strategy file '{strategyFile}' not found.[/]");
-                return;
+                if (!File.Exists(strategyFile))
+                {
+                    AnsiConsole.MarkupLine($"[red]Strategy file '{strategyFile}' not found. Skipping...[/]");
+                    continue;
+                }
+
+                var json = await File.ReadAllTextAsync(strategyFile);
+                var config = JsonSerializer.Deserialize<StrategyConfig>(json);
+
+                if (config == null)
+                {
+                    AnsiConsole.MarkupLine($"[yellow]Failed to parse strategy file '{strategyFile}'. Skipping...[/]");
+                    continue;
+                }
+
+                aggregatedConfig.Entry.AddRange(config.Entry);
+                aggregatedConfig.Exit.AddRange(config.Exit);
+
+                if (isFirstValidConfig)
+                {
+                    aggregatedConfig.Backtest = config.Backtest;
+                    isFirstValidConfig = false;
+                }
             }
 
-            var json = await File.ReadAllTextAsync(strategyFile);
-            var config = JsonSerializer.Deserialize<StrategyConfig>(json);
-            if (config == null) return;
+            if (isFirstValidConfig)
+            {
+                AnsiConsole.MarkupLine($"[red]No valid strategy files found.[/]");
+                return;
+            }
 
             var engine = _serviceProvider.GetRequiredService<IBacktestEngine>();
             var stockRepo = _serviceProvider.GetRequiredService<IStockRepository>();
@@ -49,7 +76,7 @@ public class BacktestCommandFactory
             {
                 AnsiConsole.MarkupLine($"[yellow]Running backtest for {stockOptionValue}...[/]");
                 var data = await stockRepo.GetDailyPricesAsync(stockOptionValue);
-                var result = await engine.RunAsync(stockOptionValue, config, data);
+                var result = await engine.RunAsync(stockOptionValue, aggregatedConfig, data);
 
                 var table = new Table();
                 table.AddColumn("Metric");
@@ -101,7 +128,7 @@ public class BacktestCommandFactory
                     });
 
                 AnsiConsole.MarkupLine($"[yellow]Running backtest on {historyDict.Count} stocks...[/]");
-                var results = await engine.ScanAllAsync(config, historyDict);
+                var results = await engine.ScanAllAsync(aggregatedConfig, historyDict);
 
                 var topResults = results.Take(topOptionValue).ToList();
                 var table = new Table();
