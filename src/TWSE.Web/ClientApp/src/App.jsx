@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
-  fetchPortfolio, addOrUpdatePortfolio, removePortfolio,
+  getLocalPortfolio, saveLocalPortfolio,
+  getLocalTracking, saveLocalTracking,
   fetchStrategies, scanPortfolio, fetchStocks,
-  fetchTrackingList, addTracking, removeTracking
+  fetchSnapshot
 } from './api';
 import localforage from 'localforage';
 import './index.css';
@@ -107,7 +108,7 @@ function Dashboard() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    Promise.all([fetchPortfolio(), fetchStrategies()])
+    Promise.all([getLocalPortfolio(), fetchStrategies()])
       .then(([p, s]) => { setPortfolio(p); setStrategies(s); if (s.length) setSelectedStrategy(s[0].fileName); })
       .finally(() => setLoading(false));
   }, []);
@@ -115,10 +116,10 @@ function Dashboard() {
   const runScan = useCallback(async () => {
     if (!selectedStrategy) return;
     setLoading(true);
-    const data = await scanPortfolio(selectedStrategy);
+    const data = await scanPortfolio(selectedStrategy, portfolio);
     setSignals(data);
     setLoading(false);
-  }, [selectedStrategy]);
+  }, [selectedStrategy, portfolio]);
 
   useEffect(() => { if (selectedStrategy && portfolio.length) runScan(); }, [selectedStrategy, portfolio.length, runScan]);
 
@@ -210,7 +211,7 @@ function Portfolio() {
 
   const reload = useCallback(() => {
     setLoading(true);
-    Promise.all([fetchPortfolio(), fetchStrategies()])
+    Promise.all([getLocalPortfolio(), fetchStrategies()])
       .then(([p, s]) => { setItems(p); setStrategies(s); })
       .finally(() => setLoading(false));
   }, []);
@@ -224,7 +225,11 @@ function Portfolio() {
   };
 
   const handleSave = async () => {
-    await addOrUpdatePortfolio(form);
+    const p = await getLocalPortfolio();
+    const idx = p.findIndex(i => i.stockCode === form.stockCode);
+    if (idx >= 0) p[idx] = form; else p.push(form);
+    await saveLocalPortfolio(p);
+
     setShowModal(false);
     setForm({ stockCode: '', stockName: '', quantity: 0, avgCost: 0, selectedStrategy: '' });
     reload();
@@ -232,7 +237,8 @@ function Portfolio() {
 
   const handleDelete = async (code) => {
     if (confirm(`確認刪除 ${code}？`)) {
-      await removePortfolio(code);
+      const p = await getLocalPortfolio();
+      await saveLocalPortfolio(p.filter(i => i.stockCode !== code));
       reload();
     }
   };
@@ -440,16 +446,64 @@ function Tracking({ onOpenChart }) {
   const [showColSettings, setShowColSettings] = useState(false);
   const [hiddenCols, setHiddenCols] = useState([]);
 
+  const [allStocksCache, setAllStocksCache] = useState([]);
+
   useEffect(() => {
+    fetchStocks().then(setAllStocksCache);
     localforage.getItem('twse_hidden_cols').then((val) => {
       if (val) setHiddenCols(val);
     });
   }, []);
 
-  const load = useCallback(() => {
+  const load = useCallback(async () => {
+    if (!allStocksCache.length) return;
     setLoading(true);
-    fetchTrackingList(search, statusFilter, page, pageSize).then(setData).finally(() => setLoading(false));
-  }, [search, statusFilter, page, pageSize]);
+
+    let trackingList = await getLocalTracking();
+    let portfolioList = await getLocalPortfolio();
+    let pCodes = new Set(portfolioList.map(p => p.stockCode));
+    let tCodes = new Set(trackingList);
+
+    let query = allStocksCache;
+    if (search) query = query.filter(s => s.code.includes(search) || s.name.includes(search));
+
+    if (statusFilter === '2') query = query.filter(s => pCodes.has(s.code));
+    else if (statusFilter === '1') query = query.filter(s => tCodes.has(s.code));
+    else if (statusFilter === '0') query = query.filter(s => !pCodes.has(s.code) && !tCodes.has(s.code));
+
+    // Sort by status (2: In Portfolio, 1: Tracked, 0: Untracked) then by code
+    query.sort((a, b) => {
+      let statusA = pCodes.has(a.code) ? 2 : (tCodes.has(a.code) ? 1 : 0);
+      let statusB = pCodes.has(b.code) ? 2 : (tCodes.has(b.code) ? 1 : 0);
+      if (statusA !== statusB) return statusB - statusA;
+      return a.code.localeCompare(b.code);
+    });
+    const totalCount = query.length;
+    const paged = query.slice((page - 1) * pageSize, page * pageSize);
+
+    const codes = paged.map(s => s.code);
+    const snapshots = await fetchSnapshot(codes);
+
+    const columns = ['收盤價', '成交量', 'MA20', 'RSI(14)'];
+    const items = paged.map(s => {
+      let snap = snapshots.find(x => x.stockCode === s.code);
+      let status = pCodes.has(s.code) ? 2 : (tCodes.has(s.code) ? 1 : 0);
+      return {
+        stockCode: s.code,
+        stockName: s.name,
+        status: status,
+        metrics: {
+          '收盤價': snap?.close?.toFixed(2) || '-',
+          '成交量': snap?.volume?.toLocaleString() || '-',
+          'MA20': snap?.sma20?.toFixed(2) || '-',
+          'RSI(14)': snap?.rsi14?.toFixed(2) || '-'
+        }
+      };
+    });
+
+    setData({ items, columns, totalCount });
+    setLoading(false);
+  }, [search, statusFilter, page, pageSize, allStocksCache]);
 
   useEffect(() => {
     const timer = setTimeout(() => { load(); }, 300);
@@ -462,8 +516,13 @@ function Tracking({ onOpenChart }) {
 
   const handleToggle = async (stockCode, currentStatus) => {
     if (currentStatus === 2) return; // In stock
-    if (currentStatus === 1) await removeTracking(stockCode);
-    else await addTracking(stockCode);
+    let t = await getLocalTracking();
+    if (currentStatus === 1) {
+      t = t.filter(c => c !== stockCode);
+    } else {
+      if (!t.includes(stockCode)) t.push(stockCode);
+    }
+    await saveLocalTracking(t);
     load();
   };
 

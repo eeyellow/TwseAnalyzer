@@ -4,7 +4,7 @@ using TWSE.Core.Backtesting;
 using TWSE.Core.Data;
 using TWSE.Core.Models;
 using TWSE.Core.Screening;
-using TWSE.Web.Services;
+using Skender.Stock.Indicators;
 
 namespace TWSE.Web.Controllers;
 
@@ -14,13 +14,10 @@ public class AnalysisController : ControllerBase
 {
     private readonly IStockRepository _repo;
     private readonly IConditionEvaluator _evaluator;
-    private readonly PortfolioService _portfolioService;
-
-    public AnalysisController(IStockRepository repo, IConditionEvaluator evaluator, PortfolioService portfolioService)
+    public AnalysisController(IStockRepository repo, IConditionEvaluator evaluator)
     {
         _repo = repo;
         _evaluator = evaluator;
-        _portfolioService = portfolioService;
     }
 
     [HttpGet("strategies")]
@@ -57,7 +54,7 @@ public class AnalysisController : ControllerBase
         if (config == null)
             return BadRequest("Failed to parse strategy file.");
 
-        var portfolio = _portfolioService.GetAll();
+        var portfolio = request.MyStocks ?? new List<PortfolioItemDto>();
         var results = new List<StockSignalResult>();
 
         foreach (var item in portfolio)
@@ -101,11 +98,75 @@ public class AnalysisController : ControllerBase
 
         return Ok(results);
     }
+
+    [HttpPost("snapshot")]
+    public async Task<IActionResult> GetSnapshot([FromBody] SnapshotRequest request)
+    {
+        var results = new List<SnapshotItemDto>();
+        if (request.Codes == null || !request.Codes.Any()) return Ok(results);
+
+        // Required explicitly to compute RSI, etc. We use Skender.Stock.Indicators.
+        foreach (var code in request.Codes)
+        {
+            var history = await _repo.GetDailyPricesAsync(code);
+            if (!history.Any()) continue;
+
+            var quotes = history.Select(h => new Skender.Stock.Indicators.Quote
+            {
+                Date = h.Date,
+                Open = h.Open,
+                High = h.High,
+                Low = h.Low,
+                Close = h.Close,
+                Volume = h.Volume
+            }).OrderBy(q => q.Date).ToList();
+
+            var last = quotes.Last();
+            var sma20 = quotes.GetSma(20).LastOrDefault()?.Sma;
+            var rsi14 = quotes.GetRsi(14).LastOrDefault()?.Rsi;
+
+            results.Add(new SnapshotItemDto
+            {
+                StockCode = code,
+                Date = last.Date,
+                Close = last.Close,
+                Volume = last.Volume,
+                Sma20 = sma20,
+                Rsi14 = rsi14
+            });
+        }
+
+        return Ok(results);
+    }
 }
 
 public class ScanRequest
 {
     public string StrategyFileName { get; set; } = string.Empty;
+    public List<PortfolioItemDto> MyStocks { get; set; } = new();
+}
+
+public class SnapshotRequest
+{
+    public List<string> Codes { get; set; } = new();
+}
+
+public class SnapshotItemDto
+{
+    public string StockCode { get; set; } = string.Empty;
+    public DateTime Date { get; set; }
+    public decimal Close { get; set; }
+    public decimal Volume { get; set; }
+    public double? Sma20 { get; set; }
+    public double? Rsi14 { get; set; }
+}
+
+public class PortfolioItemDto
+{
+    public string StockCode { get; set; } = string.Empty;
+    public string StockName { get; set; } = string.Empty;
+    public int Quantity { get; set; }
+    public decimal AvgCost { get; set; }
 }
 
 public class StockSignalResult

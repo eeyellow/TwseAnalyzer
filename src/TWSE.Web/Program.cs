@@ -17,8 +17,6 @@ builder.Services.AddSingleton<IIndicatorService, SkenderIndicatorService>();
 builder.Services.AddSingleton<IConditionEvaluator, JsonConditionEvaluator>();
 builder.Services.AddSingleton<IBacktestEngine, BacktestEngine>();
 builder.Services.AddSingleton<IScreener, StockScreener>();
-builder.Services.AddSingleton<PortfolioService>();
-builder.Services.AddSingleton<TrackingService>();
 builder.Services.AddHostedService<DailyUpdateService>();
 
 builder.Services.AddControllers();

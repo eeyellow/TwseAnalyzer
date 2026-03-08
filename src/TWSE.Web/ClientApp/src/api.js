@@ -1,33 +1,38 @@
+import localforage from 'localforage';
+
 const API_BASE = '/api';
 
-export async function fetchPortfolio() {
-  const res = await fetch(`${API_BASE}/portfolio`);
-  return res.json();
+// --- Local-First Portfolio Management ---
+export async function getLocalPortfolio() {
+  const p = await localforage.getItem('twse_portfolio');
+  return p || [];
 }
 
-export async function addOrUpdatePortfolio(item) {
-  const res = await fetch(`${API_BASE}/portfolio`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(item),
-  });
-  return res.json();
+export async function saveLocalPortfolio(portfolio) {
+  await localforage.setItem('twse_portfolio', portfolio);
 }
 
-export async function removePortfolio(stockCode) {
-  await fetch(`${API_BASE}/portfolio/${stockCode}`, { method: 'DELETE' });
+// --- Local-First Tracking Management ---
+export async function getLocalTracking() {
+  const t = await localforage.getItem('twse_tracking');
+  return t || [];
 }
 
+export async function saveLocalTracking(tracking) {
+  await localforage.setItem('twse_tracking', tracking);
+}
+
+// --- Stateless Server APIs ---
 export async function fetchStrategies() {
   const res = await fetch(`${API_BASE}/analysis/strategies`);
   return res.json();
 }
 
-export async function scanPortfolio(strategyFileName) {
+export async function scanPortfolio(strategyFileName, myStocks) {
   const res = await fetch(`${API_BASE}/analysis/scan-portfolio`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ strategyFileName }),
+    body: JSON.stringify({ strategyFileName, myStocks }),
   });
   return res.json();
 }
@@ -44,18 +49,12 @@ export async function fetchPrices(stockCode, days = null) {
   return res.json();
 }
 
-export async function fetchTrackingList(search = '', status = '', page = 1, pageSize = 10) {
-  const params = new URLSearchParams({ search, page, pageSize });
-  if (status !== '') params.append('status', status);
-  const res = await fetch(`${API_BASE}/tracking/list?${params.toString()}`);
+export async function fetchSnapshot(codes) {
+  if (!codes || codes.length === 0) return [];
+  const res = await fetch(`${API_BASE}/analysis/snapshot`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ codes }),
+  });
   return res.json();
 }
-
-export async function addTracking(stockCode) {
-  return await fetch(`${API_BASE}/tracking/${stockCode}`, { method: 'POST' });
-}
-
-export async function removeTracking(stockCode) {
-  return await fetch(`${API_BASE}/tracking/${stockCode}`, { method: 'DELETE' });
-}
-
