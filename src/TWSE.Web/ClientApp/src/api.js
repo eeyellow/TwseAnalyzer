@@ -2,14 +2,26 @@ import localforage from 'localforage';
 
 const API_BASE = '/api';
 
-// --- Local-First Portfolio Management ---
-export async function getLocalPortfolio() {
-  const p = await localforage.getItem('twse_portfolio');
-  return p || [];
+// --- Backend Portfolio Management ---
+export async function getPortfolio() {
+  const res = await fetch(`${API_BASE}/portfolio`);
+  return res.json();
 }
 
-export async function saveLocalPortfolio(portfolio) {
-  await localforage.setItem('twse_portfolio', portfolio);
+export async function savePortfolioItem(item) {
+  const res = await fetch(`${API_BASE}/portfolio`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(item),
+  });
+  return res.ok;
+}
+
+export async function deletePortfolioItem(stockCode) {
+  const res = await fetch(`${API_BASE}/portfolio/${stockCode}`, {
+    method: 'DELETE',
+  });
+  return res.ok;
 }
 
 // --- Local-First Tracking Management ---
@@ -25,6 +37,11 @@ export async function saveLocalTracking(tracking) {
 // --- Stateless Server APIs ---
 export async function fetchStrategies() {
   const res = await fetch(`${API_BASE}/analysis/strategies`);
+  return res.json();
+}
+
+export async function getDailyReport() {
+  const res = await fetch(`${API_BASE}/dailyreport`);
   return res.json();
 }
 
@@ -56,5 +73,16 @@ export async function fetchSnapshot(codes) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ codes }),
   });
+  return res.json();
+}
+
+// --- Manual Jobs ---
+export async function runUpdateJob() {
+  const res = await fetch(`${API_BASE}/jobs/update-data`, { method: 'POST' });
+  return res.json();
+}
+
+export async function runAnalysisJob() {
+  const res = await fetch(`${API_BASE}/jobs/run-analysis`, { method: 'POST' });
   return res.json();
 }

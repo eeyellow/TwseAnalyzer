@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
-  getLocalPortfolio, saveLocalPortfolio,
+  getPortfolio, savePortfolioItem, deletePortfolioItem,
   getLocalTracking, saveLocalTracking,
   fetchStrategies, scanPortfolio, fetchStocks,
-  fetchSnapshot
+  fetchSnapshot, getDailyReport, runUpdateJob, runAnalysisJob
 } from './api';
 import localforage from 'localforage';
 import './index.css';
@@ -40,6 +40,7 @@ function App() {
       <Sidebar page={page} setPage={setPage} />
       <main className="main-content">
         {page === 'dashboard' && <Dashboard />}
+        {page === 'scheduled' && <ScheduledAnalysis onOpenChart={openChart} />}
         {page === 'tracking' && <Tracking onOpenChart={openChart} />}
         {page === 'portfolio' && <Portfolio />}
         {page === 'analysis' && <Analysis />}
@@ -81,6 +82,7 @@ function App() {
 function Sidebar({ page, setPage }) {
   const items = [
     { id: 'dashboard', icon: '📊', label: '儀表板' },
+    { id: 'scheduled', icon: '🤖', label: '排程分析' },
     { id: 'tracking', icon: '⭐', label: '我的追蹤' },
     { id: 'portfolio', icon: '💼', label: '庫存管理' },
     { id: 'analysis', icon: '🔍', label: '策略分析' },
@@ -102,31 +104,54 @@ function Sidebar({ page, setPage }) {
 /* ─── Dashboard ─── */
 function Dashboard() {
   const [portfolio, setPortfolio] = useState([]);
-  const [strategies, setStrategies] = useState([]);
   const [signals, setSignals] = useState([]);
-  const [selectedStrategy, setSelectedStrategy] = useState('');
+  const [reportDate, setReportDate] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  const fetchReport = async () => {
+    setLoading(true);
+    try {
+      const [p, report, stocks] = await Promise.all([getPortfolio(), getDailyReport(), fetchStocks()]);
+      setPortfolio(p); 
+      if(report) {
+         setSignals(report.signals || []);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    Promise.all([getLocalPortfolio(), fetchStrategies()])
-      .then(([p, s]) => { setPortfolio(p); setStrategies(s); if (s.length) setSelectedStrategy(s[0].fileName); })
-      .finally(() => setLoading(false));
+    fetchReport();
   }, []);
 
-  const runScan = useCallback(async () => {
-    if (!selectedStrategy) return;
-    setLoading(true);
-    const data = await scanPortfolio(selectedStrategy, portfolio);
-    setSignals(data);
-    setLoading(false);
-  }, [selectedStrategy, portfolio]);
+  const combinedSignals = signals.map(s => {
+    const p = portfolio.find(x => x.stockCode === s.stockCode);
+    let pl = 0;
+    if (p) {
+        const buyCost = p.avgCost * p.quantity;
+        const currentVal = s.lastClose * p.quantity;
+        pl = currentVal - buyCost;
+    }
+    return { 
+      ...s, 
+      quantity: p ? p.quantity : 0, 
+      avgCost: p ? p.avgCost : 0, 
+      profitLoss: pl, 
+      buySignal: s.signalType === 'Buy', 
+      sellSignal: s.signalType === 'Sell' 
+    };
+  });
 
-  useEffect(() => { if (selectedStrategy && portfolio.length) runScan(); }, [selectedStrategy, portfolio.length, runScan]);
-
-  const totalValue = signals.reduce((sum, s) => sum + s.lastClose * s.quantity, 0);
-  const totalPL = signals.reduce((sum, s) => sum + s.profitLoss, 0);
-  const buyCount = signals.filter(s => s.buySignal).length;
-  const sellCount = signals.filter(s => s.sellSignal).length;
+  const totalValue = portfolio.reduce((sum, p) => {
+    const s = signals.find(x => x.stockCode === p.stockCode);
+    const price = s ? s.lastClose : p.avgCost;
+    return sum + price * p.quantity;
+  }, 0);
+  
+  const totalPL = combinedSignals.reduce((sum, s) => sum + s.profitLoss, 0);
+  const buyCount = combinedSignals.filter(s => s.buySignal).length;
+  const sellCount = combinedSignals.filter(s => s.sellSignal).length;
 
   return (
     <>
@@ -146,58 +171,195 @@ function Dashboard() {
           </div>
         </div>
         <div className="card">
-          <div className="stat-label">訊號概覽</div>
+          <div className="stat-label">盤前自動分析</div>
           <div style={{ display: 'flex', gap: 12, marginTop: 8 }}>
-            <span className="badge badge-buy">🟢 買 {buyCount}</span>
-            <span className="badge badge-sell">🔴 賣 {sellCount}</span>
+            <span className="badge badge-buy">🟢 建議買進 {buyCount}</span>
+            <span className="badge badge-sell">🔴 建議賣出 {sellCount}</span>
           </div>
         </div>
-      </div>
-
-      <div className="card">
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginBottom: 16 }}>
-          <select className="select" style={{ width: 200 }} value={selectedStrategy} onChange={e => setSelectedStrategy(e.target.value)}>
-            {strategies.map(s => <option key={s.fileName} value={s.fileName}>{s.name}</option>)}
-          </select>
-          <button className="btn btn-primary btn-sm" onClick={runScan} disabled={loading}>
-            {loading ? '分析中...' : '🔄 重新分析'}
-          </button>
-        </div>
-        {loading ? <div className="spinner" /> : (
-          signals.length === 0 ? (
-            <div className="empty-state"><div className="empty-state-icon">📭</div><p className="empty-state-text">尚無庫存，請先至「庫存管理」新增個股</p></div>
-          ) : (
-            <div className="table-container">
-              <table>
-                <thead><tr><th>股票代碼</th><th>名稱</th><th>持股</th><th>均價</th><th>現價</th><th>損益</th><th>訊號</th></tr></thead>
-                <tbody>
-                  {signals.map(s => (
-                    <tr key={s.stockCode}>
-                      <td style={{ fontWeight: 600 }}>{s.stockCode}</td>
-                      <td>{s.stockName}</td>
-                      <td>{s.quantity.toLocaleString()}</td>
-                      <td>{s.avgCost.toFixed(2)}</td>
-                      <td>{s.lastClose.toFixed(2)}</td>
-                      <td className={s.profitLoss >= 0 ? 'stat-positive' : 'stat-negative'}>
-                        {s.profitLoss >= 0 ? '+' : ''}{fmt(s.profitLoss)}
-                      </td>
-                      <td>
-                        {s.buySignal && <><span className="signal-dot buy active" /><span className="badge badge-buy">買進</span></>}
-                        {s.sellSignal && <><span className="signal-dot sell active" /><span className="badge badge-sell">賣出</span></>}
-                        {!s.buySignal && !s.sellSignal && <span className="badge badge-hold">持有</span>}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )
-        )}
       </div>
     </>
   );
 }
 
+/* ─── Scheduled Analysis ─── */
+function ScheduledAnalysis({ onOpenChart }) {
+  const [loading, setLoading] = useState(true);
+  const [portfolio, setPortfolio] = useState([]);
+  const [allStocks, setAllStocks] = useState([]);
+  const [signals, setSignals] = useState([]);
+  const [reportDate, setReportDate] = useState(null);
+  const [updating, setUpdating] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
+
+  const [search, setSearch] = useState('');
+  const [strategyFilter, setStrategyFilter] = useState('');
+  const [page, setPage] = useState(1);
+  const pageSize = 10;
+
+  const fetchReport = async () => {
+    setLoading(true);
+    try {
+      const [p, report, stocks] = await Promise.all([getPortfolio(), getDailyReport(), fetchStocks()]);
+      setPortfolio(p); 
+      setAllStocks(stocks || []);
+      if(report) {
+         setReportDate(report.date);
+         setSignals(report.signals || []);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { fetchReport(); }, []);
+
+  const handleRunUpdate = async () => {
+    if(!confirm("確定要手動觸發最新股價抓取嗎？(需要數分鐘)")) return;
+    setUpdating(true);
+    try {
+      const res = await runUpdateJob();
+      alert(res.message || "資料更新完成");
+    } catch (e) {
+      alert("更新失敗: " + e.message);
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  const handleRunAnalysis = async () => {
+    if(!confirm("確定要手動觸發全盤分析嗎？")) return;
+    setAnalyzing(true);
+    try {
+      const res = await runAnalysisJob();
+      alert(res.message || "分析完成");
+      await fetchReport();
+    } catch (e) {
+      alert("分析失敗: " + e.message);
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  const combinedSignals = signals.map(s => {
+    const p = portfolio.find(x => x.stockCode === s.stockCode);
+    const stockName = allStocks.find(x => x.code === s.stockCode)?.name || p?.stockName || 'N/A';
+    let pl = 0;
+    if (p) {
+        const buyCost = p.avgCost * p.quantity;
+        const currentVal = s.lastClose * p.quantity;
+        pl = currentVal - buyCost;
+    }
+    return { 
+      ...s, 
+      stockName,
+      quantity: p ? p.quantity : 0, 
+      avgCost: p ? p.avgCost : 0, 
+      profitLoss: pl, 
+      buySignal: s.signalType === 'Buy', 
+      sellSignal: s.signalType === 'Sell' 
+    };
+  });
+
+  let query = combinedSignals;
+  if (search) {
+     const val = search.toLowerCase();
+     query = query.filter(s => s.stockCode.includes(val) || s.stockName.includes(val));
+  }
+  if (strategyFilter) {
+     query = query.filter(s => s.strategyName === strategyFilter);
+  }
+
+  query.sort((a,b) => {
+    if(a.buySignal !== b.buySignal) return a.buySignal ? -1 : 1;
+    return a.stockCode.localeCompare(b.stockCode);
+  });
+
+  const totalCount = query.length;
+  const totalPages = Math.ceil(totalCount / pageSize) || 1;
+  const paged = query.slice((page - 1) * pageSize, page * pageSize);
+
+  const strategiesList = [...new Set(combinedSignals.map(s => s.strategyName))];
+
+  return (
+    <div className="card">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <h2 style={{ fontSize: '1.1rem', margin: 0 }}>系統排程分析結果</h2>
+          {reportDate && <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>資料日期: {new Date(reportDate).toLocaleDateString()}</span>}
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn-ghost btn-sm" onClick={handleRunUpdate} disabled={updating || analyzing}>
+            {updating ? '🔄 抓取中...' : '⬇️ 手動抓取報價'}
+          </button>
+          <button className="btn btn-primary btn-sm" onClick={handleRunAnalysis} disabled={updating || analyzing}>
+            {analyzing ? '⏳ 分析中...' : '🚀 手動執行分析'}
+          </button>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 16, marginBottom: 16 }}>
+        <input
+          className="input"
+          placeholder="搜尋代碼或名稱..."
+          value={search}
+          onChange={e => { setSearch(e.target.value); setPage(1); }}
+          style={{ maxWidth: 300 }}
+        />
+        <select className="select" style={{ maxWidth: 200 }} value={strategyFilter} onChange={e => { setStrategyFilter(e.target.value); setPage(1); }}>
+          <option value="">所有策略</option>
+          {strategiesList.map(st => <option key={st} value={st}>{st}</option>)}
+        </select>
+      </div>
+
+      {loading ? <div className="spinner" /> : (
+        <div className="table-container">
+          <table>
+            <thead><tr><th>股票代碼</th><th>名稱</th><th>策略</th><th>持股</th><th>均價</th><th>現價/建議價</th><th>損益</th><th>系統建議</th></tr></thead>
+            <tbody>
+              {paged.map(s => (
+                <tr key={`${s.stockCode}-${s.strategyName}-${s.signalType}`}>
+                  <td style={{ fontWeight: 600, cursor:'pointer', color:'var(--color-teal)' }} onClick={() => onOpenChart && onOpenChart({ stockCode: s.stockCode, stockName: s.stockName })}>
+                    {s.stockCode}
+                  </td>
+                  <td style={{ cursor:'pointer' }} onClick={() => onOpenChart && onOpenChart({ stockCode: s.stockCode, stockName: s.stockName })}>
+                    {s.stockName}
+                  </td>
+                  <td><span className="badge badge-hold">{s.strategyName}</span></td>
+                  <td>{s.quantity > 0 ? s.quantity.toLocaleString() : '-'}</td>
+                  <td>{s.avgCost > 0 ? s.avgCost.toFixed(2) : '-'}</td>
+                  <td>{s.suggestedPrice ? s.suggestedPrice.toFixed(2) : s.lastClose.toFixed(2)}</td>
+                  <td className={s.profitLoss >= 0 ? 'stat-positive' : 'stat-negative'}>
+                    {s.quantity > 0 ? `${s.profitLoss >= 0 ? '+' : ''}${fmt(s.profitLoss)}` : '-'}
+                  </td>
+                  <td>
+                    {s.buySignal && <><span className="signal-dot buy active" /><span className="badge badge-buy">買進</span></>}
+                    {s.sellSignal && <><span className="signal-dot sell active" /><span className="badge badge-sell">賣出</span></>}
+                  </td>
+                </tr>
+              ))}
+              {paged.length === 0 && (
+                <tr><td colSpan="8" style={{ textAlign: 'center', padding: 32 }}>查無資料</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 20 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+            共 {totalCount} 筆 (第 {page} / {totalPages} 頁)
+          </span>
+        </div>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button className="btn btn-ghost btn-sm" disabled={page <= 1} onClick={() => setPage(page - 1)}>上一頁</button>
+          <button className="btn btn-ghost btn-sm" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>下一頁</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 /* ─── Portfolio ─── */
 function Portfolio() {
   const [items, setItems] = useState([]);
@@ -211,7 +373,7 @@ function Portfolio() {
 
   const reload = useCallback(() => {
     setLoading(true);
-    Promise.all([getLocalPortfolio(), fetchStrategies()])
+    Promise.all([getPortfolio(), fetchStrategies()])
       .then(([p, s]) => { setItems(p); setStrategies(s); })
       .finally(() => setLoading(false));
   }, []);
@@ -225,11 +387,7 @@ function Portfolio() {
   };
 
   const handleSave = async () => {
-    const p = await getLocalPortfolio();
-    const idx = p.findIndex(i => i.stockCode === form.stockCode);
-    if (idx >= 0) p[idx] = form; else p.push(form);
-    await saveLocalPortfolio(p);
-
+    await savePortfolioItem(form);
     setShowModal(false);
     setForm({ stockCode: '', stockName: '', quantity: 0, avgCost: 0, selectedStrategy: '' });
     reload();
@@ -237,8 +395,7 @@ function Portfolio() {
 
   const handleDelete = async (code) => {
     if (confirm(`確認刪除 ${code}？`)) {
-      const p = await getLocalPortfolio();
-      await saveLocalPortfolio(p.filter(i => i.stockCode !== code));
+      await deletePortfolioItem(code);
       reload();
     }
   };
@@ -378,7 +535,8 @@ function Analysis() {
   const runScan = async () => {
     if (!selectedStrategy) return;
     setLoading(true);
-    const data = await scanPortfolio(selectedStrategy);
+    const p = await getPortfolio();
+    const data = await scanPortfolio(selectedStrategy, p);
     setSignals(data);
     setLoading(false);
   };
@@ -460,7 +618,7 @@ function Tracking({ onOpenChart }) {
     setLoading(true);
 
     let trackingList = await getLocalTracking();
-    let portfolioList = await getLocalPortfolio();
+    let portfolioList = await getPortfolio();
     let pCodes = new Set(portfolioList.map(p => p.stockCode));
     let tCodes = new Set(trackingList);
 

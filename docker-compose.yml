@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  twse-app:
+    build: .
+    container_name: twse-app
+    ports:
+      - "9010:5000"
+    restart: always
+    volumes:
+      # 掛載本機的資料與策略，確保容器重啟時資料不遺失
+      - ./data:/app/data
+      - ./strategies:/app/strategies

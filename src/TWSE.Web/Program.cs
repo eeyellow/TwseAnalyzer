@@ -17,6 +17,7 @@ builder.Services.AddSingleton<IIndicatorService, SkenderIndicatorService>();
 builder.Services.AddSingleton<IConditionEvaluator, JsonConditionEvaluator>();
 builder.Services.AddSingleton<IBacktestEngine, BacktestEngine>();
 builder.Services.AddSingleton<IScreener, StockScreener>();
+builder.Services.AddScoped<DailyAnalysisService>();
 builder.Services.AddHostedService<DailyUpdateService>();
 
 builder.Services.AddControllers();
@@ -36,5 +37,12 @@ app.MapControllers();
 
 // SPA fallback: serve index.html for any non-API routes
 app.MapFallbackToFile("index.html");
+
+// Ensure database tables are created
+using (var scope = app.Services.CreateScope())
+{
+    var repo = scope.ServiceProvider.GetRequiredService<IStockRepository>();
+    await repo.InitializeDatabaseAsync();
+}
 
 app.Run();

@@ -5,21 +5,29 @@ namespace TWSE.Web.Services;
 public class DailyUpdateService : BackgroundService
 {
     private readonly ILogger<DailyUpdateService> _logger;
+    private readonly IServiceProvider _serviceProvider;
 
-    public DailyUpdateService(ILogger<DailyUpdateService> logger)
+    public DailyUpdateService(ILogger<DailyUpdateService> logger, IServiceProvider serviceProvider)
     {
         _logger = logger;
+        _serviceProvider = serviceProvider;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        // 1. 在啟動後端服務時，立刻去檢查並同步
+        await CheckAndUpdateAsync(stoppingToken);
+
         while (!stoppingToken.IsCancellationRequested)
         {
             var now = DateTime.Now;
-            // Run at 18:00 every weekday (after market close)
+            // 每天晚上 18:00 定時觸發檢查
             var nextRun = now.Date.AddHours(18);
-            if (now > nextRun || now.DayOfWeek == DayOfWeek.Saturday || now.DayOfWeek == DayOfWeek.Sunday)
-                nextRun = GetNextWeekday(now.Date.AddDays(1)).AddHours(18);
+            if (now >= nextRun)
+                nextRun = nextRun.AddDays(1);
+
+            while (nextRun.DayOfWeek == DayOfWeek.Saturday || nextRun.DayOfWeek == DayOfWeek.Sunday)
+                nextRun = nextRun.AddDays(1);
 
             var delay = nextRun - now;
             _logger.LogInformation("Next daily update scheduled at {NextRun} (in {Delay})", nextRun, delay);
@@ -28,9 +36,59 @@ public class DailyUpdateService : BackgroundService
 
             if (!stoppingToken.IsCancellationRequested)
             {
-                await RunUpdateAsync();
+                await CheckAndUpdateAsync(stoppingToken);
             }
         }
+    }
+
+    private async Task CheckAndUpdateAsync(CancellationToken stoppingToken)
+    {
+        try
+        {
+            using var scope = _serviceProvider.CreateScope();
+            var stockRepo = scope.ServiceProvider.GetRequiredService<TWSE.Core.Data.IStockRepository>();
+            
+            // 2. 每次觸發時，先到資料庫檢查目前最新的資料時間 (用台積電 2330)
+            var latestDate = await stockRepo.GetLatestPriceDateAsync("2330");
+            var targetDate = GetTargetMarketDate();
+
+            if (latestDate == null || latestDate.Value.Date < targetDate)
+            {
+                _logger.LogInformation("Latest data for 2330 is {LatestDate:yyyy-MM-dd}. Target date is {TargetDate:yyyy-MM-dd}. Running update...", latestDate, targetDate);
+                await RunUpdateAsync();
+                
+                // 3. 更新完畢後，執行盤前分析 (選股與庫存分析)
+                var analysisService = scope.ServiceProvider.GetRequiredService<DailyAnalysisService>();
+                await analysisService.RunAnalysisAsync(targetDate);
+            }
+            else
+            {
+                _logger.LogInformation("Data is up to date (Latest: {LatestDate:yyyy-MM-dd}). No update needed.", latestDate);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed during check and update tracking");
+        }
+    }
+
+    private DateTime GetTargetMarketDate()
+    {
+        var now = DateTime.Now;
+        var target = now.Date;
+
+        // 如果目前還沒到傍晚 6 點，那麼「最新應該要有的資料」是昨天的營業日
+        if (now.Hour < 18)
+        {
+             target = target.AddDays(-1);
+        }
+
+        // 迴避掉六日，找到最近的一個營業日
+        while (target.DayOfWeek == DayOfWeek.Saturday || target.DayOfWeek == DayOfWeek.Sunday)
+        {
+            target = target.AddDays(-1);
+        }
+        return target;
     }
 
     private async Task RunUpdateAsync()
@@ -41,12 +99,16 @@ public class DailyUpdateService : BackgroundService
             var cliProjectPath = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "TWSE.Cli");
             cliProjectPath = Path.GetFullPath(cliProjectPath);
 
+            var rootProjectPath = Path.Combine(cliProjectPath, "..", "..");
+            rootProjectPath = Path.GetFullPath(rootProjectPath);
+
             var psi = new ProcessStartInfo
             {
                 FileName = "dotnet",
                 Arguments = $"run --project \"{cliProjectPath}\" -- update",
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
+                WorkingDirectory = rootProjectPath,
+                RedirectStandardOutput = false,
+                RedirectStandardError = false,
                 UseShellExecute = false,
                 CreateNoWindow = true
             };
@@ -54,13 +116,8 @@ public class DailyUpdateService : BackgroundService
             using var process = Process.Start(psi);
             if (process != null)
             {
-                var output = await process.StandardOutput.ReadToEndAsync();
-                var error = await process.StandardError.ReadToEndAsync();
                 await process.WaitForExitAsync();
-
-                _logger.LogInformation("Update completed with exit code {ExitCode}. Output: {Output}", process.ExitCode, output);
-                if (!string.IsNullOrEmpty(error))
-                    _logger.LogWarning("Update stderr: {Error}", error);
+                _logger.LogInformation("Update completed with exit code {ExitCode}.", process.ExitCode);
             }
         }
         catch (Exception ex)
@@ -69,10 +126,5 @@ public class DailyUpdateService : BackgroundService
         }
     }
 
-    private static DateTime GetNextWeekday(DateTime date)
-    {
-        while (date.DayOfWeek == DayOfWeek.Saturday || date.DayOfWeek == DayOfWeek.Sunday)
-            date = date.AddDays(1);
-        return date;
-    }
+
 }

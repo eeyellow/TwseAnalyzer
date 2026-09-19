@@ -40,12 +40,34 @@ public class SqliteRepository : IStockRepository
                 PRIMARY KEY (code, date)
             );";
 
+        var createPortfolioTable = @"
+            CREATE TABLE IF NOT EXISTS portfolio (
+                code TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                quantity INTEGER NOT NULL,
+                avg_cost REAL NOT NULL
+            );";
+
+        var createDailySignalsTable = @"
+            CREATE TABLE IF NOT EXISTS daily_signals (
+                date TEXT NOT NULL,
+                code TEXT NOT NULL,
+                signal_type TEXT NOT NULL,
+                strategy_name TEXT NOT NULL,
+                suggested_price REAL,
+                last_close REAL NOT NULL,
+                PRIMARY KEY (date, code, strategy_name)
+            );";
+
         var createIndex = @"
             CREATE INDEX IF NOT EXISTS idx_daily_prices_date ON daily_prices(date);
+            CREATE INDEX IF NOT EXISTS idx_daily_signals_date ON daily_signals(date);
         ";
 
         await connection.ExecuteAsync(createStocksTable);
         await connection.ExecuteAsync(createDailyPricesTable);
+        await connection.ExecuteAsync(createPortfolioTable);
+        await connection.ExecuteAsync(createDailySignalsTable);
         await connection.ExecuteAsync(createIndex);
     }
 
@@ -135,5 +157,88 @@ public class SqliteRepository : IStockRepository
         
         if (string.IsNullOrEmpty(dateText)) return null;
         return DateTime.Parse(dateText);
+    }
+
+    public async Task<List<PortfolioItem>> GetPortfolioAsync()
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        var sql = "SELECT code as StockCode, name as StockName, quantity, avg_cost as AvgCost FROM portfolio ORDER BY code";
+        return (await connection.QueryAsync<PortfolioItem>(sql)).ToList();
+    }
+
+    public async Task UpdatePortfolioItemAsync(PortfolioItem item)
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+        var sql = @"
+            INSERT INTO portfolio (code, name, quantity, avg_cost)
+            VALUES (@StockCode, @StockName, @Quantity, @AvgCost)
+            ON CONFLICT(code) DO UPDATE SET
+                name = excluded.name,
+                quantity = excluded.quantity,
+                avg_cost = excluded.avg_cost;";
+        await connection.ExecuteAsync(sql, item);
+    }
+
+    public async Task DeletePortfolioItemAsync(string stockCode)
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+        var sql = "DELETE FROM portfolio WHERE code = @StockCode";
+        await connection.ExecuteAsync(sql, new { StockCode = stockCode });
+    }
+
+    public async Task InsertDailySignalsAsync(IEnumerable<DailySignal> signals, DateTime date)
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+        using var transaction = connection.BeginTransaction();
+
+        // 每次重新插入當日同一策略的信號前，先清空當日的舊紀錄（可避免重複或更新不乾淨）
+        var deleteSql = "DELETE FROM daily_signals WHERE date = @DateText";
+        await connection.ExecuteAsync(deleteSql, new { DateText = date.ToString("yyyy-MM-dd") }, transaction);
+
+        var sql = @"
+            INSERT INTO daily_signals (date, code, signal_type, strategy_name, suggested_price, last_close)
+            VALUES (@DateText, @StockCode, @SignalType, @StrategyName, @SuggestedPrice, @LastClose);";
+
+        var param = signals.Select(s => new {
+            DateText = s.Date.ToString("yyyy-MM-dd"),
+            s.StockCode,
+            s.SignalType,
+            s.StrategyName,
+            s.SuggestedPrice,
+            s.LastClose
+        });
+
+        await connection.ExecuteAsync(sql, param, transaction);
+        await transaction.CommitAsync();
+    }
+
+    private class DailySignalDto
+    {
+        public string DateText { get; set; }
+        public string StockCode { get; set; }
+        public string SignalType { get; set; }
+        public string StrategyName { get; set; }
+        public decimal? SuggestedPrice { get; set; }
+        public double LastClose { get; set; } // SQLite REAL often maps safely to double, then we cast
+    }
+
+    public async Task<List<DailySignal>> GetDailySignalsAsync(DateTime date)
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        var sql = "SELECT date as DateText, code as StockCode, signal_type as SignalType, strategy_name as StrategyName, suggested_price as SuggestedPrice, last_close as LastClose FROM daily_signals WHERE date = @DateText ORDER BY code";
+        
+        var dtoList = await connection.QueryAsync<DailySignalDto>(sql, new { DateText = date.ToString("yyyy-MM-dd") });
+        
+        return dtoList.Select(d => new DailySignal {
+            Date = DateTime.Parse(d.DateText),
+            StockCode = d.StockCode,
+            SignalType = d.SignalType,
+            StrategyName = d.StrategyName,
+            SuggestedPrice = d.SuggestedPrice,
+            LastClose = (decimal)d.LastClose
+        }).ToList();
     }
 }
