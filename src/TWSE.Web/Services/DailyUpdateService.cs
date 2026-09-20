@@ -93,38 +93,34 @@ public class DailyUpdateService : BackgroundService
 
     private async Task RunUpdateAsync()
     {
-        _logger.LogInformation("Starting daily data update...");
+        _logger.LogInformation("Starting scheduled daily data update in-process...");
         try
         {
-            var cliProjectPath = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "TWSE.Cli");
-            cliProjectPath = Path.GetFullPath(cliProjectPath);
+            using var scope = _serviceProvider.CreateScope();
+            var updateService = scope.ServiceProvider.GetRequiredService<TWSE.Core.Data.IDataUpdateService>();
+            var stockRepo = scope.ServiceProvider.GetRequiredService<TWSE.Core.Data.IStockRepository>();
 
-            var rootProjectPath = Path.Combine(cliProjectPath, "..", "..");
-            rootProjectPath = Path.GetFullPath(rootProjectPath);
-
-            var psi = new ProcessStartInfo
+            var stocks = await stockRepo.GetAllStocksAsync();
+            int success = 0;
+            int fail = 0;
+            foreach (var stock in stocks)
             {
-                FileName = "dotnet",
-                Arguments = $"run --project \"{cliProjectPath}\" -- update",
-                WorkingDirectory = rootProjectPath,
-                RedirectStandardOutput = false,
-                RedirectStandardError = false,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-
-            using var process = Process.Start(psi);
-            if (process != null)
-            {
-                await process.WaitForExitAsync();
-                _logger.LogInformation("Update completed with exit code {ExitCode}.", process.ExitCode);
+                try
+                {
+                    await updateService.UpdateHistoricalDataAsync(stock.Code);
+                    success++;
+                }
+                catch (Exception ex)
+                {
+                    fail++;
+                    _logger.LogWarning("Failed to update stock {Code}: {Message}", stock.Code, ex.Message);
+                }
             }
+            _logger.LogInformation("Scheduled daily data update completed. Success: {Success}, Failed: {Fail}", success, fail);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to run daily update");
         }
     }
-
-
 }

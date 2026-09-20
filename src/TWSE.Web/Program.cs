@@ -7,12 +7,17 @@ using TWSE.Web.Services;
 var builder = WebApplication.CreateBuilder(args);
 
 // Database
-var dbPath = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "data", "twse.db");
-dbPath = Path.GetFullPath(dbPath);
+var currentDataPath = Path.Combine(Directory.GetCurrentDirectory(), "data", "twse.db");
+var fallbackDataPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "data", "twse.db"));
+var dbPath = File.Exists(currentDataPath) ? currentDataPath : (File.Exists(fallbackDataPath) ? fallbackDataPath : currentDataPath);
+var dbDir = Path.GetDirectoryName(dbPath);
+if (!string.IsNullOrEmpty(dbDir) && !Directory.Exists(dbDir)) Directory.CreateDirectory(dbDir);
 var connectionString = $"Data Source={dbPath}";
 
 builder.Services.AddSingleton<IStockRepository>(new SqliteRepository(connectionString));
 builder.Services.AddSingleton<HttpClient>();
+builder.Services.AddSingleton<IYahooFetcher, YahooFetcher>();
+builder.Services.AddSingleton<IDataUpdateService, DataUpdateService>();
 builder.Services.AddSingleton<IIndicatorService, SkenderIndicatorService>();
 builder.Services.AddSingleton<IConditionEvaluator, JsonConditionEvaluator>();
 builder.Services.AddSingleton<IBacktestEngine, BacktestEngine>();

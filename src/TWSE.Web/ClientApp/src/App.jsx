@@ -42,8 +42,8 @@ function App() {
         {page === 'dashboard' && <Dashboard />}
         {page === 'scheduled' && <ScheduledAnalysis onOpenChart={openChart} />}
         {page === 'tracking' && <Tracking onOpenChart={openChart} />}
-        {page === 'portfolio' && <Portfolio />}
-        {page === 'analysis' && <Analysis />}
+        {page === 'portfolio' && <Portfolio onOpenChart={openChart} />}
+        {page === 'analysis' && <Analysis onOpenChart={openChart} />}
       </main>
 
       <StockChartModal
@@ -105,16 +105,22 @@ function Sidebar({ page, setPage }) {
 function Dashboard() {
   const [portfolio, setPortfolio] = useState([]);
   const [signals, setSignals] = useState([]);
-  const [reportDate, setReportDate] = useState(null);
+  const [snapshots, setSnapshots] = useState({});
   const [loading, setLoading] = useState(true);
 
   const fetchReport = async () => {
     setLoading(true);
     try {
-      const [p, report, stocks] = await Promise.all([getPortfolio(), getDailyReport(), fetchStocks()]);
-      setPortfolio(p); 
-      if(report) {
+      const [p, report] = await Promise.all([getPortfolio(), getDailyReport()]);
+      setPortfolio(p || []); 
+      if (report) {
          setSignals(report.signals || []);
+      }
+      if (p && p.length > 0) {
+        const snaps = await fetchSnapshot(p.map(x => x.stockCode));
+        const snapMap = {};
+        snaps.forEach(s => { snapMap[s.stockCode] = s.close; });
+        setSnapshots(snapMap);
       }
     } finally {
       setLoading(false);
@@ -125,33 +131,20 @@ function Dashboard() {
     fetchReport();
   }, []);
 
-  const combinedSignals = signals.map(s => {
-    const p = portfolio.find(x => x.stockCode === s.stockCode);
-    let pl = 0;
-    if (p) {
-        const buyCost = p.avgCost * p.quantity;
-        const currentVal = s.lastClose * p.quantity;
-        pl = currentVal - buyCost;
-    }
-    return { 
-      ...s, 
-      quantity: p ? p.quantity : 0, 
-      avgCost: p ? p.avgCost : 0, 
-      profitLoss: pl, 
-      buySignal: s.signalType === 'Buy', 
-      sellSignal: s.signalType === 'Sell' 
-    };
-  });
-
   const totalValue = portfolio.reduce((sum, p) => {
-    const s = signals.find(x => x.stockCode === p.stockCode);
-    const price = s ? s.lastClose : p.avgCost;
-    return sum + price * p.quantity;
+    const currentPrice = snapshots[p.stockCode] || p.avgCost;
+    return sum + currentPrice * p.quantity;
   }, 0);
   
-  const totalPL = combinedSignals.reduce((sum, s) => sum + s.profitLoss, 0);
-  const buyCount = combinedSignals.filter(s => s.buySignal).length;
-  const sellCount = combinedSignals.filter(s => s.sellSignal).length;
+  const totalPL = portfolio.reduce((sum, p) => {
+    const currentPrice = snapshots[p.stockCode] || p.avgCost;
+    const cost = p.avgCost * p.quantity;
+    const val = currentPrice * p.quantity;
+    return sum + (val - cost);
+  }, 0);
+
+  const buyCount = signals.filter(s => s.signalType === 'Buy').length;
+  const sellCount = signals.filter(s => s.signalType === 'Sell').length;
 
   return (
     <>
@@ -162,12 +155,12 @@ function Dashboard() {
         </div>
         <div className="card">
           <div className="stat-label">市值估計</div>
-          <div className="stat-value">{fmt(totalValue)}</div>
+          <div className="stat-value">{loading ? '...' : fmt(totalValue)}</div>
         </div>
         <div className="card">
           <div className="stat-label">未實現損益</div>
           <div className={`stat-value ${totalPL >= 0 ? 'stat-positive' : 'stat-negative'}`}>
-            {totalPL >= 0 ? '+' : ''}{fmt(totalPL)}
+            {loading ? '...' : `${totalPL >= 0 ? '+' : ''}${fmt(totalPL)}`}
           </div>
         </div>
         <div className="card">
@@ -361,7 +354,7 @@ function ScheduledAnalysis({ onOpenChart }) {
   );
 }
 /* ─── Portfolio ─── */
-function Portfolio() {
+function Portfolio({ onOpenChart }) {
   const [items, setItems] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [allStocks, setAllStocks] = useState([]);
@@ -441,8 +434,8 @@ function Portfolio() {
                 <tbody>
                   {items.map(i => (
                     <tr key={i.stockCode}>
-                      <td style={{ fontWeight: 600 }}>{i.stockCode}</td>
-                      <td>{i.stockName}</td>
+                      <td style={{ fontWeight: 600, cursor: 'pointer', color: 'var(--color-teal)' }} onClick={() => onOpenChart && onOpenChart(i)}>{i.stockCode}</td>
+                      <td style={{ cursor: 'pointer' }} onClick={() => onOpenChart && onOpenChart(i)}>{i.stockName}</td>
                       <td>{i.quantity.toLocaleString()}</td>
                       <td>{i.avgCost.toFixed(2)}</td>
                       <td><span className="badge badge-hold">{i.selectedStrategy || '預設'}</span></td>
@@ -524,20 +517,30 @@ function Portfolio() {
 }
 
 /* ─── Analysis ─── */
-function Analysis() {
+function Analysis({ onOpenChart }) {
   const [strategies, setStrategies] = useState([]);
   const [selectedStrategy, setSelectedStrategy] = useState('');
   const [signals, setSignals] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [hasScanned, setHasScanned] = useState(false);
+  const [portfolioEmpty, setPortfolioEmpty] = useState(false);
 
   useEffect(() => { fetchStrategies().then(s => { setStrategies(s); if (s.length) setSelectedStrategy(s[0].fileName); }); }, []);
 
   const runScan = async () => {
     if (!selectedStrategy) return;
     setLoading(true);
+    setHasScanned(true);
     const p = await getPortfolio();
+    if (!p || p.length === 0) {
+      setPortfolioEmpty(true);
+      setSignals([]);
+      setLoading(false);
+      return;
+    }
+    setPortfolioEmpty(false);
     const data = await scanPortfolio(selectedStrategy, p);
-    setSignals(data);
+    setSignals(data || []);
     setLoading(false);
   };
 
@@ -563,6 +566,24 @@ function Analysis() {
         </div>
       </div>
 
+      {portfolioEmpty && hasScanned && (
+        <div className="card">
+          <div className="empty-state">
+            <div className="empty-state-icon">💼</div>
+            <p className="empty-state-text">目前庫存中尚無持股，請先至「庫存管理」新增持股以進行策略分析。</p>
+          </div>
+        </div>
+      )}
+
+      {!portfolioEmpty && hasScanned && signals.length === 0 && !loading && (
+        <div className="card">
+          <div className="empty-state">
+            <div className="empty-state-icon">🔍</div>
+            <p className="empty-state-text">庫存個股目前皆未觸發此策略之買賣訊號。</p>
+          </div>
+        </div>
+      )}
+
       {signals.length > 0 && (
         <div className="card">
           <div className="table-container">
@@ -571,8 +592,8 @@ function Analysis() {
               <tbody>
                 {signals.map(s => (
                   <tr key={s.stockCode}>
-                    <td style={{ fontWeight: 600 }}>{s.stockCode}</td>
-                    <td>{s.stockName}</td>
+                    <td style={{ fontWeight: 600, cursor: 'pointer', color: 'var(--color-teal)' }} onClick={() => onOpenChart && onOpenChart(s)}>{s.stockCode}</td>
+                    <td style={{ cursor: 'pointer' }} onClick={() => onOpenChart && onOpenChart(s)}>{s.stockName}</td>
                     <td>{s.lastClose.toFixed(2)}</td>
                     <td>{new Date(s.lastDate).toLocaleDateString('zh-TW')}</td>
                     <td>{s.buySignal ? <span className="badge badge-buy"><span className="signal-dot buy active" />觸發</span> : '—'}</td>

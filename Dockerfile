@@ -1,9 +1,13 @@
 # 使用包含 .NET SDK 的基底映像檔 (為保留原本呼叫專案 cli 等指令架構)
 FROM mcr.microsoft.com/dotnet/sdk:10.0
 
-# 安裝 Node.js (用於打包前端 React 專案)
-RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
-    && apt-get install -y nodejs
+# 安裝 tzdata 設定時區 (確保排程於台北時間 18:00 準確觸發) 與 Node.js
+ENV TZ=Asia/Taipei
+RUN apt-get update && apt-get install -y tzdata curl \
+    && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
 
 # 設置工作目錄
 WORKDIR /app

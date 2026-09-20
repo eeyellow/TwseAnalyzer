@@ -56,8 +56,8 @@ public class AnalyzeCommandFactory
                 
                 var hist = macdList[index].Histogram;
                 var histStr = hist?.ToString("F2") ?? "-";
-                if (hist > 0) histStr = $"[green]{histStr}[/]";
-                else if (hist < 0) histStr = $"[red]+{histStr}[/]"; // add red color
+                if (hist > 0) histStr = $"[green]+{histStr}[/]";
+                else if (hist < 0) histStr = $"[red]{histStr}[/]";
 
                 table.AddRow(
                     p.Date.ToString("yyyy-MM-dd"),

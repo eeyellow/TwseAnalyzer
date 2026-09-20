@@ -28,12 +28,15 @@ public class DailyAnalysisService
             var evaluator = scope.ServiceProvider.GetRequiredService<IConditionEvaluator>();
 
             // 1. Get strategies
-            var strategiesDir = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "strategies");
-            strategiesDir = Path.GetFullPath(strategiesDir);
+            var strategiesDir = Path.Combine(Directory.GetCurrentDirectory(), "strategies");
+            if (!Directory.Exists(strategiesDir))
+            {
+                strategiesDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "strategies"));
+            }
             
             if (!Directory.Exists(strategiesDir))
             {
-                _logger.LogWarning("Strategies directory not found.");
+                _logger.LogWarning("Strategies directory not found at {Path}", strategiesDir);
                 return;
             }
 
@@ -47,9 +50,15 @@ public class DailyAnalysisService
                 var strategyName = Path.GetFileNameWithoutExtension(file);
                 var json = await File.ReadAllTextAsync(file);
                 var config = JsonSerializer.Deserialize<StrategyConfig>(json);
-                if (config == null || config.Entry == null) continue;
+                if (config == null) continue;
 
-                screenerConfig.Screen = config.Entry;
+                var entryConditions = (config.Entry != null && config.Entry.Any())
+                    ? config.Entry
+                    : (config.Screen ?? new List<string>());
+
+                if (!entryConditions.Any()) continue;
+
+                screenerConfig.Screen = entryConditions;
                 var matched = await screener.ScanAsync(screenerConfig);
 
                 foreach (var match in matched)
@@ -79,10 +88,18 @@ public class DailyAnalysisService
                 var strategyName = Path.GetFileNameWithoutExtension(file);
                 var json = await File.ReadAllTextAsync(file);
                 var config = JsonSerializer.Deserialize<StrategyConfig>(json);
-                if (config == null || config.Exit == null) continue;
+                if (config == null || config.Exit == null || !config.Exit.Any()) continue;
 
                 foreach (var item in portfolio)
                 {
+                    // If user specified a strategy for this portfolio item, only evaluate matching strategy
+                    if (!string.IsNullOrEmpty(item.SelectedStrategy) &&
+                        !item.SelectedStrategy.Equals(Path.GetFileName(file), StringComparison.OrdinalIgnoreCase) &&
+                        !item.SelectedStrategy.Equals(strategyName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+
                     var history = await stockRepo.GetDailyPricesAsync(item.StockCode);
                     if (history.Count == 0) continue;
 

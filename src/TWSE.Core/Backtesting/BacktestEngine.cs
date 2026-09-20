@@ -21,117 +21,153 @@ public class BacktestEngine : IBacktestEngine
             FinalCapital = config.Backtest.InitialCapital
         };
 
-        if (history.Count == 0) return Task.FromResult(result);
+        if (history.Count < 2) return Task.FromResult(result);
 
-        // Filter history by StartDate and EndDate if provided
-        var filteredHistory = history.Where(h =>
+        DateTime? startDate = DateTime.TryParse(config.Backtest.StartDate, out var sd) ? sd.Date : null;
+        DateTime? endDate = DateTime.TryParse(config.Backtest.EndDate, out var ed) ? ed.Date : null;
+
+        // Find the index where evaluation starts (preserving previous data for indicator warmup)
+        int startIndex = 0;
+        if (startDate.HasValue)
         {
-            bool ok = true;
-            if (DateTime.TryParse(config.Backtest.StartDate, out var sd)) ok &= h.Date >= sd;
-            if (DateTime.TryParse(config.Backtest.EndDate, out var ed)) ok &= h.Date <= ed;
-            return ok;
-        }).ToList();
+            startIndex = -1;
+            for (int k = 0; k < history.Count; k++)
+            {
+                if (history[k].Date.Date >= startDate.Value)
+                {
+                    startIndex = k;
+                    break;
+                }
+            }
+            if (startIndex < 0 || startIndex >= history.Count - 1)
+            {
+                return Task.FromResult(result); // No data within test window
+            }
+        }
 
-        if (filteredHistory.Count < 2) return Task.FromResult(result);
+        int endIndex = history.Count - 1;
+        if (endDate.HasValue)
+        {
+            for (int k = history.Count - 1; k >= startIndex; k--)
+            {
+                if (history[k].Date.Date <= endDate.Value)
+                {
+                    endIndex = k;
+                    break;
+                }
+            }
+        }
 
-        decimal currentCapital = result.InitialCapital;
+        if (endIndex <= startIndex) return Task.FromResult(result);
+
+        decimal cash = result.InitialCapital;
         TradeRecord? openTrade = null;
-        decimal peakCapital = currentCapital;
+        decimal peakCapital = cash;
         decimal maxDrawdown = 0;
         var dailyReturns = new List<decimal>();
-        decimal previousCapital = currentCapital;
+        decimal previousEquity = cash;
 
-        for (int i = 0; i < filteredHistory.Count - 1; i++) // Cannot evaluate on the last day since execution is next day
+        for (int i = startIndex; i <= endIndex; i++)
         {
-            // Calculate daily return for Sharpe Ratio later
-            decimal dailyReturn = previousCapital != 0 ? (currentCapital - previousCapital) / previousCapital : 0m;
-            dailyReturns.Add(dailyReturn);
-            previousCapital = currentCapital;
+            var currentDay = history[i];
 
-            // Check max drawdown
-            if (currentCapital > peakCapital) peakCapital = currentCapital;
-            decimal drawdown = peakCapital > 0 ? (peakCapital - currentCapital) / peakCapital : 0;
+            // Mark-to-market daily equity (Cash + Current Holding Market Value)
+            decimal dailyEquity = cash + (openTrade != null ? openTrade.Quantity * currentDay.Close : 0m);
+
+            if (i > startIndex && previousEquity > 0)
+            {
+                decimal dailyReturn = (dailyEquity - previousEquity) / previousEquity;
+                dailyReturns.Add(dailyReturn);
+            }
+            previousEquity = dailyEquity;
+
+            if (dailyEquity > peakCapital) peakCapital = dailyEquity;
+            decimal drawdown = peakCapital > 0 ? (peakCapital - dailyEquity) / peakCapital : 0;
             if (drawdown > maxDrawdown) maxDrawdown = drawdown;
 
-            // Execution happens next day open
-            var nextDay = filteredHistory[i + 1];
-
-            if (openTrade == null)
+            // Signal evaluation and execution for the next trading day
+            if (i < endIndex)
             {
-                // Check entry conditions
-                if (_evaluator.EvaluateAll(config.Entry, filteredHistory, i))
+                var nextDay = history[i + 1];
+
+                if (openTrade == null)
                 {
-                    // Execute entry
-                    decimal price = nextDay.Open;
-                    if (price <= 0) continue; // Skip if price data is invalid
-
-                    int maxShares = (int)(config.Backtest.PositionSize / price);
-                    int quantity = (maxShares / 1000) * 1000; // Round down to multiple of 1000
-
-                    if (quantity > 0 && currentCapital >= quantity * price)
+                    // Check entry conditions on complete history
+                    if (_evaluator.EvaluateAll(config.Entry, history, i))
                     {
-                        openTrade = new TradeRecord
+                        decimal price = nextDay.Open;
+                        if (price > 0)
                         {
-                            StockCode = stockCode,
-                            BuyDate = nextDay.Date,
-                            BuyPrice = price,
-                            Quantity = quantity,
-                            CommissionRate = config.Backtest.CommissionRate,
-                            TaxRate = config.Backtest.TaxRate
-                        };
-                        currentCapital -= openTrade.TotalCost;
+                            int maxShares = (int)(config.Backtest.PositionSize / price);
+                            int quantity = (maxShares / 1000) * 1000;
+
+                            if (quantity > 0 && cash >= quantity * price)
+                            {
+                                openTrade = new TradeRecord
+                                {
+                                    StockCode = stockCode,
+                                    BuyDate = nextDay.Date,
+                                    BuyPrice = price,
+                                    Quantity = quantity,
+                                    CommissionRate = config.Backtest.CommissionRate,
+                                    TaxRate = config.Backtest.TaxRate
+                                };
+                                cash -= openTrade.TotalCost;
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    // Check exit conditions on complete history
+                    if (_evaluator.EvaluateAll(config.Exit, history, i))
+                    {
+                        decimal price = nextDay.Open;
+                        if (price > 0)
+                        {
+                            openTrade.SellDate = nextDay.Date;
+                            openTrade.SellPrice = price;
+
+                            cash += openTrade.TotalRevenue ?? 0;
+                            result.Trades.Add(openTrade);
+                            openTrade = null;
+                        }
                     }
                 }
             }
-            else
-            {
-                // Check exit conditions
-                if (_evaluator.EvaluateAll(config.Exit, filteredHistory, i))
-                {
-                    // Execute exit
-                    decimal price = nextDay.Open;
-                    if (price <= 0) continue; // Skip if price data is invalid
-
-                    openTrade.SellDate = nextDay.Date;
-                    openTrade.SellPrice = price;
-
-                    currentCapital += openTrade.TotalRevenue ?? 0;
-                    result.Trades.Add(openTrade);
-                    openTrade = null;
-                }
-            }
         }
 
-        // Force close at the end if still open
+        // Force close at the end of the backtest period if still open
         if (openTrade != null)
         {
-            var lastDay = filteredHistory[^1];
+            var lastDay = history[endIndex];
             openTrade.SellDate = lastDay.Date;
-            openTrade.SellPrice = lastDay.Close; // Close price of the last day
-            currentCapital += openTrade.TotalRevenue ?? 0;
+            openTrade.SellPrice = lastDay.Close;
+            cash += openTrade.TotalRevenue ?? 0;
             result.Trades.Add(openTrade);
+            openTrade = null;
         }
 
-        result.FinalCapital = currentCapital;
+        result.FinalCapital = cash;
         result.MaxDrawdown = maxDrawdown;
 
-        // Calculate Annualized Return
-        double days = (filteredHistory[^1].Date - filteredHistory[0].Date).TotalDays;
-        if (days > 0)
+        // Calculate Annualized Return based on test window span
+        double days = (history[endIndex].Date - history[startIndex].Date).TotalDays;
+        if (days > 0 && (1 + result.TotalReturn) > 0)
         {
             result.AnnualizedReturn = (decimal)(Math.Pow((double)(1 + result.TotalReturn), 365.0 / days) - 1);
         }
 
-        // Calculate Sharpe Ratio (simplified, assuming 0 risk free rate, based on daily returns)
+        // Calculate Annualized Sharpe Ratio based on daily equity returns
         if (dailyReturns.Count > 1)
         {
             decimal avgDailyReturn = dailyReturns.Average();
-            decimal sumOfSquaresOfDifferences = dailyReturns.Select(val => (val - avgDailyReturn) * (val - avgDailyReturn)).Sum();
-            decimal stdDev = (decimal)Math.Sqrt((double)sumOfSquaresOfDifferences / (dailyReturns.Count - 1));
-            
+            decimal sumOfSquares = dailyReturns.Select(val => (val - avgDailyReturn) * (val - avgDailyReturn)).Sum();
+            decimal stdDev = (decimal)Math.Sqrt((double)sumOfSquares / (dailyReturns.Count - 1));
+
             if (stdDev > 0)
             {
-                result.SharpeRatio = (avgDailyReturn / stdDev) * (decimal)Math.Sqrt(252); // Annualized Sharpe
+                result.SharpeRatio = (avgDailyReturn / stdDev) * (decimal)Math.Sqrt(252);
             }
         }
 

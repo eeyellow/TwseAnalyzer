@@ -52,4 +52,41 @@ public class JsonConditionEvaluatorTests
         // but we assert we don't exception.
         Assert.IsType<bool>(result);
     }
+
+    [Fact]
+    public void Evaluate_VolumeSma_ShouldEvaluateProperly()
+    {
+        var data = GenerateDummyData();
+        // Index 49 volume is 1000, VolumeSma(5) will be 1000
+        bool result = _evaluator.Evaluate("Volume greater_than_or_equal VolumeSma(5)", data, 49);
+        Assert.True(result);
+
+        bool resultFalse = _evaluator.Evaluate("Volume greater_than VolumeSma(5) * 1.5", data, 49);
+        Assert.False(resultFalse);
+    }
+
+    [Fact]
+    public void Evaluate_HighAndLow_ShouldWork()
+    {
+        var data = GenerateDummyData();
+        // High is 105 + 49 = 154, Low is 95 + 49 = 144
+        bool result = _evaluator.Evaluate("High greater_than Low", data, 49);
+        Assert.True(result);
+    }
+
+    [Fact]
+    public void Evaluate_Ema_ShouldWork()
+    {
+        var data = GenerateDummyData();
+        bool result = _evaluator.Evaluate("Close greater_than EMA(12)", data, 49);
+        Assert.IsType<bool>(result);
+    }
+
+    [Fact]
+    public void Evaluate_RsiCrossAbove_ShouldWorkWithoutThrowing()
+    {
+        var data = GenerateDummyData();
+        bool result = _evaluator.Evaluate("RSI(14) cross_above 30", data, 49);
+        Assert.IsType<bool>(result);
+    }
 }

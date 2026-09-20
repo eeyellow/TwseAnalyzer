@@ -118,12 +118,26 @@ public class JsonConditionEvaluator : IConditionEvaluator
             var sma = _indicatorService.CalculateSma(history, period).ToList();
             return history.Select((h, i) => i < sma.Count ? sma[i].Sma : null).ToList();
         }
+
+        if (operand.StartsWith("EMA(", StringComparison.OrdinalIgnoreCase))
+        {
+            var period = ExtractPeriod(operand);
+            var ema = _indicatorService.CalculateEma(history, period).ToList();
+            return history.Select((h, i) => i < ema.Count ? ema[i].Ema : null).ToList();
+        }
         
         if (operand.StartsWith("VolumeSma(", StringComparison.OrdinalIgnoreCase))
         {
              var period = ExtractPeriod(operand);
              var sma = _indicatorService.CalculateVolumeSma(history, period).ToList();
              return history.Select((h, i) => i < sma.Count ? sma[i].Sma : null).ToList();
+        }
+
+        if (operand.StartsWith("RSI(", StringComparison.OrdinalIgnoreCase))
+        {
+            var period = ExtractPeriod(operand);
+            var rsiList = _indicatorService.CalculateRsi(history, period).ToList();
+            return history.Select((h, i) => i < rsiList.Count ? rsiList[i].Rsi : null).ToList();
         }
 
         if (operand.StartsWith("K(", StringComparison.OrdinalIgnoreCase))
@@ -140,7 +154,12 @@ public class JsonConditionEvaluator : IConditionEvaluator
             return history.Select((h, i) => i < kdList.Count ? kdList[i].Signal : null).ToList();
         }
 
-        // Add more indicators as needed for MVP...
+        if (operand.Equals("Close", StringComparison.OrdinalIgnoreCase)) return history.Select(h => (double?)h.Close).ToList();
+        if (operand.Equals("Open", StringComparison.OrdinalIgnoreCase)) return history.Select(h => (double?)h.Open).ToList();
+        if (operand.Equals("High", StringComparison.OrdinalIgnoreCase)) return history.Select(h => (double?)h.High).ToList();
+        if (operand.Equals("Low", StringComparison.OrdinalIgnoreCase)) return history.Select(h => (double?)h.Low).ToList();
+        if (operand.Equals("Volume", StringComparison.OrdinalIgnoreCase)) return history.Select(h => (double?)h.Volume).ToList();
+
         return history.Select(h => (double?)h.Close).ToList(); // Fallback to Close price
     }
 
@@ -160,6 +179,8 @@ public class JsonConditionEvaluator : IConditionEvaluator
         if (operand.Equals("Volume", StringComparison.OrdinalIgnoreCase)) return (double)history[index].Volume;
         if (operand.Equals("Close", StringComparison.OrdinalIgnoreCase)) return (double)history[index].Close;
         if (operand.Equals("Open", StringComparison.OrdinalIgnoreCase)) return (double)history[index].Open;
+        if (operand.Equals("High", StringComparison.OrdinalIgnoreCase)) return (double)history[index].High;
+        if (operand.Equals("Low", StringComparison.OrdinalIgnoreCase)) return (double)history[index].Low;
 
         if (operand.StartsWith("RSI(", StringComparison.OrdinalIgnoreCase))
         {
@@ -172,6 +193,20 @@ public class JsonConditionEvaluator : IConditionEvaluator
         {
             var period = ExtractPeriod(operand);
             var smaList = _indicatorService.CalculateSma(history, period).ToList();
+            if (index < smaList.Count) return smaList[index].Sma;
+        }
+
+        if (operand.StartsWith("EMA(", StringComparison.OrdinalIgnoreCase))
+        {
+            var period = ExtractPeriod(operand);
+            var emaList = _indicatorService.CalculateEma(history, period).ToList();
+            if (index < emaList.Count) return emaList[index].Ema;
+        }
+
+        if (operand.StartsWith("VolumeSma(", StringComparison.OrdinalIgnoreCase))
+        {
+            var period = ExtractPeriod(operand);
+            var smaList = _indicatorService.CalculateVolumeSma(history, period).ToList();
             if (index < smaList.Count) return smaList[index].Sma;
         }
 

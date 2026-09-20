@@ -1,5 +1,5 @@
-using System.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
+using TWSE.Core.Data;
 using TWSE.Web.Services;
 
 namespace TWSE.Web.Controllers;
@@ -9,45 +9,50 @@ namespace TWSE.Web.Controllers;
 public class JobsController : ControllerBase
 {
     private readonly DailyAnalysisService _analysisService;
+    private readonly IDataUpdateService _updateService;
+    private readonly IStockRepository _stockRepo;
     private readonly ILogger<JobsController> _logger;
 
-    public JobsController(DailyAnalysisService analysisService, ILogger<JobsController> logger)
+    public JobsController(
+        DailyAnalysisService analysisService,
+        IDataUpdateService updateService,
+        IStockRepository stockRepo,
+        ILogger<JobsController> logger)
     {
         _analysisService = analysisService;
+        _updateService = updateService;
+        _stockRepo = stockRepo;
         _logger = logger;
     }
 
     [HttpPost("update-data")]
     public async Task<IActionResult> UpdateData()
     {
-        _logger.LogInformation("Manual trigger: Starting daily data update...");
+        _logger.LogInformation("Manual trigger: Starting daily data update in-process...");
         try
         {
-            var cliProjectPath = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "src", "TWSE.Cli");
-            cliProjectPath = Path.GetFullPath(cliProjectPath);
+            var stocks = await _stockRepo.GetAllStocksAsync();
+            var stockCodes = stocks.Select(s => s.Code).ToList();
+            _logger.LogInformation("Updating historical data for {Count} stocks...", stockCodes.Count);
 
-            var rootProjectPath = Path.Combine(cliProjectPath, "..", "..");
-            rootProjectPath = Path.GetFullPath(rootProjectPath);
-
-            var psi = new ProcessStartInfo
+            int success = 0;
+            int fail = 0;
+            foreach (var code in stockCodes)
             {
-                FileName = "dotnet",
-                Arguments = $"run --project \"{cliProjectPath}\" -- update",
-                WorkingDirectory = rootProjectPath,
-                RedirectStandardOutput = false,
-                RedirectStandardError = false,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            };
-
-            using var process = Process.Start(psi);
-            if (process != null)
-            {
-                await process.WaitForExitAsync();
-                _logger.LogInformation("Manual trigger: Update completed with exit code {ExitCode}.", process.ExitCode);
+                try
+                {
+                    await _updateService.UpdateHistoricalDataAsync(code);
+                    success++;
+                }
+                catch (Exception ex)
+                {
+                    fail++;
+                    _logger.LogWarning("Failed to update {Code}: {Message}", code, ex.Message);
+                }
             }
 
-            return Ok(new { message = "資料更新完成" });
+            _logger.LogInformation("Daily update completed. Success: {Success}, Failed: {Fail}", success, fail);
+            return Ok(new { message = $"資料更新完成 (成功: {success}, 失敗/略過: {fail})" });
         }
         catch (Exception ex)
         {

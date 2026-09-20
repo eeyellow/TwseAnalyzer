@@ -20,11 +20,19 @@ public class AnalysisController : ControllerBase
         _evaluator = evaluator;
     }
 
+    private static string GetStrategiesDirectory()
+    {
+        var currentDir = Path.Combine(Directory.GetCurrentDirectory(), "strategies");
+        if (Directory.Exists(currentDir)) return currentDir;
+
+        var relativeDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "strategies"));
+        return relativeDir;
+    }
+
     [HttpGet("strategies")]
     public IActionResult GetStrategies()
     {
-        var strategiesDir = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "strategies");
-        strategiesDir = Path.GetFullPath(strategiesDir);
+        var strategiesDir = GetStrategiesDirectory();
 
         if (!Directory.Exists(strategiesDir))
             return Ok(Array.Empty<object>());
@@ -42,9 +50,9 @@ public class AnalysisController : ControllerBase
     [HttpPost("scan-portfolio")]
     public async Task<IActionResult> ScanPortfolio([FromBody] ScanRequest request)
     {
-        var strategiesDir = Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "strategies");
-        strategiesDir = Path.GetFullPath(strategiesDir);
-        var strategyPath = Path.Combine(strategiesDir, request.StrategyFileName);
+        var strategiesDir = GetStrategiesDirectory();
+        var safeFileName = Path.GetFileName(request.StrategyFileName);
+        var strategyPath = Path.Combine(strategiesDir, safeFileName);
 
         if (!System.IO.File.Exists(strategyPath))
             return BadRequest($"Strategy file '{request.StrategyFileName}' not found.");
@@ -57,14 +65,19 @@ public class AnalysisController : ControllerBase
         var portfolio = request.MyStocks ?? new List<PortfolioItemDto>();
         var results = new List<StockSignalResult>();
 
+        var entryConditions = (config.Entry != null && config.Entry.Any())
+            ? config.Entry
+            : (config.Screen ?? new List<string>());
+        var exitConditions = config.Exit ?? new List<string>();
+
         foreach (var item in portfolio)
         {
             var history = await _repo.GetDailyPricesAsync(item.StockCode);
             if (history.Count < 20) continue;
 
             var lastIndex = history.Count - 1;
-            var buySignal = _evaluator.EvaluateAll(config.Entry, history, lastIndex);
-            var sellSignal = _evaluator.EvaluateAll(config.Exit, history, lastIndex);
+            var buySignal = entryConditions.Any() && _evaluator.EvaluateAll(entryConditions, history, lastIndex);
+            var sellSignal = exitConditions.Any() && _evaluator.EvaluateAll(exitConditions, history, lastIndex);
 
             decimal profitLoss = 0;
             if (item.Quantity > 0)
@@ -167,6 +180,7 @@ public class PortfolioItemDto
     public string StockName { get; set; } = string.Empty;
     public int Quantity { get; set; }
     public decimal AvgCost { get; set; }
+    public string? SelectedStrategy { get; set; }
 }
 
 public class StockSignalResult

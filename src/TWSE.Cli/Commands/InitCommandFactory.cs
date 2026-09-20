@@ -51,6 +51,8 @@ public class InitCommandFactory
                     var task = ctx.AddTask("[green]Downloading historical data...[/]", new ProgressTaskSettings { MaxValue = stocks.Count });
 
                     var totalStocks = stocks.Select(s => s.Code).ToList();
+                    int successCount = 0;
+                    int emptyCount = 0;
                     
                     // Simple batching to show progress, throttled by YahooFetcher internally
                     foreach (var code in totalStocks)
@@ -59,12 +61,17 @@ public class InitCommandFactory
                         if (data.Any())
                         {
                             await stockRepo.InsertDailyPricesAsync(data);
+                            successCount++;
+                        }
+                        else
+                        {
+                            emptyCount++;
                         }
                         task.Increment(1);
                     }
-                });
 
-            AnsiConsole.MarkupLine("[bold green]Initialization complete![/]");
+                    AnsiConsole.MarkupLine($"[bold green]Initialization complete![/] Downloaded: [green]{successCount}[/], No Data/Skipped: [yellow]{emptyCount}[/]");
+                });
         });
 
         return command;

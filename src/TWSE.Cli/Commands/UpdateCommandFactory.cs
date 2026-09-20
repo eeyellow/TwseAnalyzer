@@ -30,22 +30,26 @@ public class UpdateCommandFactory
                 .StartAsync(async ctx =>
                 {
                     var task = ctx.AddTask("[green]Updating historical data...[/]", new ProgressTaskSettings { MaxValue = stockCodes.Count });
+                    int successCount = 0;
+                    int failCount = 0;
 
                     foreach (var code in stockCodes)
                     {
                         try
                         {
                             await updateService.UpdateHistoricalDataAsync(code);
+                            successCount++;
                         }
-                        catch
+                        catch (Exception ex)
                         {
-                            // ignore individual fail
+                            failCount++;
+                            AnsiConsole.MarkupLine($"[grey]Warning: Failed to update {code}: {ex.Message}[/]");
                         }
                         task.Increment(1);
                     }
-                });
 
-            AnsiConsole.MarkupLine("[bold green]Update complete![/]");
+                    AnsiConsole.MarkupLine($"[bold green]Update complete![/] Success: [green]{successCount}[/], Failed/Skipped: [yellow]{failCount}[/]");
+                });
         });
 
         return command;

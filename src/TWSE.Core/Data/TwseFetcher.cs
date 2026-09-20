@@ -52,12 +52,12 @@ public class TwseFetcher : ITwseFetcher
             }
             else if (tds.Count >= 6)
             {
-                if (currentType != "股票" && currentType != "ETF")
+                if (currentType != "股票" && currentType != "ETF" && currentType != "創新板" && currentType != "臺灣存託憑證(TDR)")
                     continue;
 
                 var codeAndName = tds[0].InnerText.Trim();
-                var parts = codeAndName.Split('\u3000', 2, StringSplitOptions.RemoveEmptyEntries);
-                
+                var parts = codeAndName.Split(new[] { '\u3000', ' ' }, 2, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length == 0) continue;
                 
                 results.Add(new StockInfo
                 {

@@ -83,30 +83,56 @@ export default function StockChartModal({ stock, onClose, onMinimize }) {
         const closes = res.map(d => d.close);
 
         // Tech Indicators
-        const ma20 = [...Array(19).fill('-'), ...sma({ period: 20, values: closes })];
-        const ma60 = [...Array(59).fill('-'), ...sma({ period: 60, values: closes })];
+        let ma20 = Array(closes.length).fill('-');
+        if (closes.length >= 20) {
+            try {
+                const sma20 = sma({ period: 20, values: closes });
+                ma20 = [...Array(closes.length - sma20.length).fill('-'), ...sma20];
+            } catch (e) {
+                console.warn('Failed to calculate MA20', e);
+            }
+        }
+
+        let ma60 = Array(closes.length).fill('-');
+        if (closes.length >= 60) {
+            try {
+                const sma60 = sma({ period: 60, values: closes });
+                ma60 = [...Array(closes.length - sma60.length).fill('-'), ...sma60];
+            } catch (e) {
+                console.warn('Failed to calculate MA60', e);
+            }
+        }
 
         // MACD
-        const macdResult = macd({
-            values: closes,
-            fastPeriod: 12,
-            slowPeriod: 26,
-            signalPeriod: 9,
-            SimpleMAOscillator: false,
-            SimpleMASignal: false
-        });
+        let macdHist = Array(closes.length).fill(0);
+        let macdLine = Array(closes.length).fill(0);
+        let signalLine = Array(closes.length).fill(0);
 
-        // Padding MACD to match length
-        const macdPad = closes.length - macdResult.length;
-        const macdHist = [...Array(macdPad).fill(0)];
-        const macdLine = [...Array(macdPad).fill(0)];
-        const signalLine = [...Array(macdPad).fill(0)];
+        if (closes.length >= 26) {
+            try {
+                const macdResult = macd({
+                    values: closes,
+                    fastPeriod: 12,
+                    slowPeriod: 26,
+                    signalPeriod: 9,
+                    SimpleMAOscillator: false,
+                    SimpleMASignal: false
+                });
 
-        macdResult.forEach(m => {
-            macdHist.push(m.histogram || 0);
-            macdLine.push(m.MACD || 0);
-            signalLine.push(m.signal || 0);
-        });
+                const macdPad = closes.length - macdResult.length;
+                macdHist = [...Array(macdPad).fill(0)];
+                macdLine = [...Array(macdPad).fill(0)];
+                signalLine = [...Array(macdPad).fill(0)];
+
+                macdResult.forEach(m => {
+                    macdHist.push(m.histogram || 0);
+                    macdLine.push(m.MACD || 0);
+                    signalLine.push(m.signal || 0);
+                });
+            } catch (e) {
+                console.warn('Failed to calculate MACD', e);
+            }
+        }
 
         return { dates, kData, volumes, ma20, ma60, macdHist, macdLine, signalLine };
     }, [data, period]);

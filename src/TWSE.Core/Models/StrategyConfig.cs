@@ -28,6 +28,9 @@ public class StrategyConfig
     [JsonPropertyName("backtest")]
     public BacktestParams Backtest { get; set; } = new();
 
+    [JsonPropertyName("screen")]
+    public List<string> Screen { get; set; } = new();
+
     [JsonPropertyName("entry")]
     public List<string> Entry { get; set; } = new();
 

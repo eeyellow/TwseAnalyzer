@@ -15,10 +15,9 @@ public class DataUpdateService : IDataUpdateService
     {
         var latestDate = await _repository.GetLatestPriceDateAsync(stockCode);
         
-        // If we have data, we want to fetch starting from the next day.
-        var startDate = latestDate?.AddDays(1);
+        // Overlap by 7 days to heal recent gaps, handle weekend/holiday transitions, and overwrite incomplete intraday bars.
+        var startDate = latestDate?.AddDays(-7);
         
-        // Yahoo API uses inclusive dates. If we already have up to yesterday, startDate will be today.
         var data = await _fetcher.FetchHistoricalDataAsync(stockCode, startDate, null);
         
         if (data.Any())

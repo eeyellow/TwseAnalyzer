@@ -45,7 +45,8 @@ public class SqliteRepository : IStockRepository
                 code TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
                 quantity INTEGER NOT NULL,
-                avg_cost REAL NOT NULL
+                avg_cost REAL NOT NULL,
+                selected_strategy TEXT
             );";
 
         var createDailySignalsTable = @"
@@ -69,6 +70,12 @@ public class SqliteRepository : IStockRepository
         await connection.ExecuteAsync(createPortfolioTable);
         await connection.ExecuteAsync(createDailySignalsTable);
         await connection.ExecuteAsync(createIndex);
+
+        try
+        {
+            await connection.ExecuteAsync("ALTER TABLE portfolio ADD COLUMN selected_strategy TEXT;");
+        }
+        catch { /* Column may already exist */ }
     }
 
     public async Task InsertStocksAsync(IEnumerable<StockInfo> stocks)
@@ -162,7 +169,7 @@ public class SqliteRepository : IStockRepository
     public async Task<List<PortfolioItem>> GetPortfolioAsync()
     {
         using var connection = new SqliteConnection(_connectionString);
-        var sql = "SELECT code as StockCode, name as StockName, quantity, avg_cost as AvgCost FROM portfolio ORDER BY code";
+        var sql = "SELECT code as StockCode, name as StockName, quantity, avg_cost as AvgCost, selected_strategy as SelectedStrategy FROM portfolio ORDER BY code";
         return (await connection.QueryAsync<PortfolioItem>(sql)).ToList();
     }
 
@@ -171,12 +178,13 @@ public class SqliteRepository : IStockRepository
         using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync();
         var sql = @"
-            INSERT INTO portfolio (code, name, quantity, avg_cost)
-            VALUES (@StockCode, @StockName, @Quantity, @AvgCost)
+            INSERT INTO portfolio (code, name, quantity, avg_cost, selected_strategy)
+            VALUES (@StockCode, @StockName, @Quantity, @AvgCost, @SelectedStrategy)
             ON CONFLICT(code) DO UPDATE SET
                 name = excluded.name,
                 quantity = excluded.quantity,
-                avg_cost = excluded.avg_cost;";
+                avg_cost = excluded.avg_cost,
+                selected_strategy = excluded.selected_strategy;";
         await connection.ExecuteAsync(sql, item);
     }
 
@@ -200,7 +208,11 @@ public class SqliteRepository : IStockRepository
 
         var sql = @"
             INSERT INTO daily_signals (date, code, signal_type, strategy_name, suggested_price, last_close)
-            VALUES (@DateText, @StockCode, @SignalType, @StrategyName, @SuggestedPrice, @LastClose);";
+            VALUES (@DateText, @StockCode, @SignalType, @StrategyName, @SuggestedPrice, @LastClose)
+            ON CONFLICT(date, code, strategy_name) DO UPDATE SET
+                signal_type = excluded.signal_type,
+                suggested_price = excluded.suggested_price,
+                last_close = excluded.last_close;";
 
         var param = signals.Select(s => new {
             DateText = s.Date.ToString("yyyy-MM-dd"),
@@ -217,10 +229,10 @@ public class SqliteRepository : IStockRepository
 
     private class DailySignalDto
     {
-        public string DateText { get; set; }
-        public string StockCode { get; set; }
-        public string SignalType { get; set; }
-        public string StrategyName { get; set; }
+        public string DateText { get; set; } = string.Empty;
+        public string StockCode { get; set; } = string.Empty;
+        public string SignalType { get; set; } = string.Empty;
+        public string StrategyName { get; set; } = string.Empty;
         public decimal? SuggestedPrice { get; set; }
         public double LastClose { get; set; } // SQLite REAL often maps safely to double, then we cast
     }
@@ -240,5 +252,12 @@ public class SqliteRepository : IStockRepository
             SuggestedPrice = d.SuggestedPrice,
             LastClose = (decimal)d.LastClose
         }).ToList();
+    }
+
+    public async Task<DateTime?> GetLatestSignalDateAsync()
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        var dateStr = await connection.QueryFirstOrDefaultAsync<string>("SELECT MAX(date) FROM daily_signals");
+        return string.IsNullOrEmpty(dateStr) ? null : DateTime.Parse(dateStr);
     }
 }

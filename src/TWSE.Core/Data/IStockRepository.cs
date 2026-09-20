@@ -21,4 +21,5 @@ public interface IStockRepository
     // Daily Signals
     Task InsertDailySignalsAsync(IEnumerable<DailySignal> signals, DateTime date);
     Task<List<DailySignal>> GetDailySignalsAsync(DateTime date);
+    Task<DateTime?> GetLatestSignalDateAsync();
 }

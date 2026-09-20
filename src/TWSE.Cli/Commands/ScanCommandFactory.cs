@@ -45,8 +45,9 @@ public class ScanCommandFactory
                     continue;
                 }
 
-                // Aggregate conditions (AND logic built-in to JasonConditionEvaluator)
-                aggregatedConfig.Screen.AddRange(config.Screen);
+                // Aggregate conditions (fallback to Entry if Screen is not specified)
+                var conditions = config.Screen.Count > 0 ? config.Screen : config.Entry;
+                aggregatedConfig.Screen.AddRange(conditions);
 
                 // Use the first strategy file to dictate the sorting and limits
                 if (isFirstValidConfig)
@@ -60,6 +61,12 @@ public class ScanCommandFactory
             if (isFirstValidConfig)
             {
                 AnsiConsole.MarkupLine($"[red]No valid strategy files found.[/]");
+                return;
+            }
+
+            if (aggregatedConfig.Screen.Count == 0)
+            {
+                AnsiConsole.MarkupLine($"[red]No screening or entry conditions defined in the specified strategy file(s).[/]");
                 return;
             }
 

@@ -18,21 +18,16 @@ public class DailyReportController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> Get()
     {
-        // 先嘗試抓今天的分析結果
         var targetDate = DateTime.Now.Date;
         var signals = await _repo.GetDailySignalsAsync(targetDate);
         
-        // 如果今天還沒資料，往回找最近的 5 天
         if (!signals.Any())
         {
-            for (int i = 1; i <= 5; i++)
+            var latestDate = await _repo.GetLatestSignalDateAsync();
+            if (latestDate.HasValue)
             {
-                signals = await _repo.GetDailySignalsAsync(targetDate.AddDays(-i));
-                if (signals.Any())
-                {
-                    targetDate = targetDate.AddDays(-i);
-                    break;
-                }
+                targetDate = latestDate.Value;
+                signals = await _repo.GetDailySignalsAsync(targetDate);
             }
         }
 

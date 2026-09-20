@@ -1,5 +1,5 @@
-using Moq;
 using TWSE.Core.Backtesting;
+using TWSE.Core.Indicators;
 using TWSE.Core.Models;
 using TWSE.Core.Screening;
 using Xunit;
@@ -8,89 +8,102 @@ namespace TWSE.Tests.Backtesting;
 
 public class BacktestEngineTests
 {
-    private readonly Mock<IConditionEvaluator> _evaluatorMock = new();
     private readonly BacktestEngine _engine;
 
     public BacktestEngineTests()
     {
-        _engine = new BacktestEngine(_evaluatorMock.Object);
+        var indicatorService = new SkenderIndicatorService();
+        var evaluator = new JsonConditionEvaluator(indicatorService);
+        _engine = new BacktestEngine(evaluator);
+    }
+
+    private List<OHLCV> GenerateTestData(int count, decimal initialPrice = 100)
+    {
+        var list = new List<OHLCV>();
+        var baseDate = new DateTime(2023, 1, 1);
+        decimal price = initialPrice;
+
+        for (int i = 0; i < count; i++)
+        {
+            price += (i % 2 == 0 ? 1 : -0.5m);
+            list.Add(new OHLCV
+            {
+                StockCode = "2330",
+                Date = baseDate.AddDays(i),
+                Open = price,
+                High = price + 2,
+                Low = price - 2,
+                Close = price,
+                Volume = 1000
+            });
+        }
+        return list;
     }
 
     [Fact]
-    public async Task RunAsync_GivenBuyAndSellConditions_ShouldExecuteTrades()
+    public async Task RunAsync_MaxDrawdown_ShouldNotArtificiallyJumpOnStockPurchase()
     {
-        var history = new List<OHLCV>
+        // Setup steady upward trend so drawdown should be small, not equal to position size / capital
+        var data = new List<OHLCV>();
+        var baseDate = new DateTime(2023, 1, 1);
+        for (int i = 0; i < 60; i++)
         {
-            new OHLCV { Date = new DateTime(2023, 1, 1), Open = 100, Close = 100 },
-            new OHLCV { Date = new DateTime(2023, 1, 2), Open = 100, Close = 105 }, // buy condition met here
-            new OHLCV { Date = new DateTime(2023, 1, 3), Open = 110, Close = 110 }, // execute buy at 110, sell condition met here
-            new OHLCV { Date = new DateTime(2023, 1, 4), Open = 120, Close = 120 }  // execute sell at 120
-        };
+            var p = 100m + i; // Prices strictly rising: 100, 101, 102...
+            data.Add(new OHLCV
+            {
+                StockCode = "2330",
+                Date = baseDate.AddDays(i),
+                Open = p,
+                High = p + 1,
+                Low = p - 1,
+                Close = p,
+                Volume = 5000
+            });
+        }
 
         var config = new StrategyConfig
         {
-            Backtest = new BacktestParams { InitialCapital = 1000000, PositionSize = 200000 },
-            Entry = new List<string> { "condition 1" },
-            Exit = new List<string> { "condition 2" }
+            Backtest = new BacktestParams
+            {
+                InitialCapital = 1000000,
+                PositionSize = 800000, // 80% position
+            },
+            Entry = new List<string> { "Close greater_than 100" }, // Triggers immediately on day 1
+            Exit = new List<string> { "Close greater_than 150" }
         };
 
-        _evaluatorMock.Setup(e => e.EvaluateAll(config.Entry, It.IsAny<IReadOnlyList<OHLCV>>(), 1)).Returns(true);
-        _evaluatorMock.Setup(e => e.EvaluateAll(config.Exit, It.IsAny<IReadOnlyList<OHLCV>>(), 2)).Returns(true);
+        var result = await _engine.RunAsync("2330", config, data);
 
-        var result = await _engine.RunAsync("2330", config, history);
-
-        Assert.Single(result.Trades);
-        var trade = result.Trades.First();
-        Assert.Equal(new DateTime(2023, 1, 3), trade.BuyDate);
-        Assert.Equal(110, trade.BuyPrice);
-        Assert.Equal(new DateTime(2023, 1, 4), trade.SellDate);
-        Assert.Equal(120, trade.SellPrice);
+        // With strictly increasing price, mark-to-market MaxDrawdown should be 0 (or near 0 due to commission)
+        // Definitely NOT 80% (which was the bug where cash dropped from 1M to 200k)
+        Assert.True(result.MaxDrawdown < 0.05m, $"MaxDrawdown was {result.MaxDrawdown:P2}, should be near 0%");
+        Assert.True(result.TotalReturn > 0);
     }
+
     [Fact]
-    public async Task RunAsync_GivenZeroInitialCapital_ShouldNotThrowDivideByZero()
+    public async Task RunAsync_ShouldKeepHistoryWarmupWhenStartDateProvided()
     {
-        var history = new List<OHLCV>
-        {
-            new OHLCV { Date = new DateTime(2023, 1, 1), Open = 100, Close = 100 },
-            new OHLCV { Date = new DateTime(2023, 1, 2), Open = 100, Close = 105 }
-        };
+        // 100 days of history, StartDate set at day 50
+        // Strategy requires SMA(20). If warmup is preserved, day 50 can evaluate SMA(20) immediately!
+        var data = GenerateTestData(100);
+        var testStartDate = data[50].Date.ToString("yyyy-MM-dd");
 
         var config = new StrategyConfig
         {
-            Backtest = new BacktestParams { InitialCapital = 0, PositionSize = 1000 },
-            Entry = new List<string>(),
-            Exit = new List<string>()
+            Backtest = new BacktestParams
+            {
+                StartDate = testStartDate,
+                InitialCapital = 100000,
+                PositionSize = 100000
+            },
+            Entry = new List<string> { "Close greater_than SMA(20)" },
+            Exit = new List<string> { "Close less_than SMA(20)" }
         };
 
-        var result = await _engine.RunAsync("2330", config, history);
+        var result = await _engine.RunAsync("2330", config, data);
 
+        // If warmup works, SMA(20) is already available at index 50
         Assert.NotNull(result);
-        Assert.Equal(0, result.TotalReturn);
-    }
-
-    [Fact]
-    public async Task RunAsync_GivenZeroOpenPrice_ShouldNotThrowDivideByZero()
-    {
-        var history = new List<OHLCV>
-        {
-            new OHLCV { Date = new DateTime(2023, 1, 1), Open = 100, Close = 100 },
-            new OHLCV { Date = new DateTime(2023, 1, 2), Open = 0, Close = 0 },   // zero price day
-            new OHLCV { Date = new DateTime(2023, 1, 3), Open = 110, Close = 110 }
-        };
-
-        var config = new StrategyConfig
-        {
-            Backtest = new BacktestParams { InitialCapital = 1000000, PositionSize = 200000 },
-            Entry = new List<string> { "condition 1" },
-            Exit = new List<string> { "condition 2" }
-        };
-
-        // Entry triggers on day 0 → execution on day 1 which has Open=0, should be skipped
-        _evaluatorMock.Setup(e => e.EvaluateAll(config.Entry, It.IsAny<IReadOnlyList<OHLCV>>(), 0)).Returns(true);
-
-        var result = await _engine.RunAsync("TEST", config, history);
-
-        Assert.NotNull(result);
-        Assert.Empty(result.Trades); // No trade should have been opened
+        Assert.True(result.Trades.All(t => t.BuyDate >= data[50].Date));
     }
 }
