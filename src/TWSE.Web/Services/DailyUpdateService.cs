@@ -15,8 +15,12 @@ public class DailyUpdateService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        // 1. 在啟動後端服務時，立刻去檢查並同步
-        await CheckAndUpdateAsync(stoppingToken);
+        // 1. 在啟動後端服務時，於背景執行檢查，不阻塞 Kestrel 即時處理請求
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(2000, stoppingToken); // 稍微延遲 2 秒讓主程式與資料庫就緒
+            await CheckAndUpdateAsync(stoppingToken);
+        }, stoppingToken);
 
         while (!stoppingToken.IsCancellationRequested)
         {

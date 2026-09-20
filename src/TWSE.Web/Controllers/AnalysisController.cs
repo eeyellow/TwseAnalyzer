@@ -22,11 +22,25 @@ public class AnalysisController : ControllerBase
 
     private static string GetStrategiesDirectory()
     {
-        var currentDir = Path.Combine(Directory.GetCurrentDirectory(), "strategies");
-        if (Directory.Exists(currentDir)) return currentDir;
+        var current = new DirectoryInfo(Directory.GetCurrentDirectory());
+        while (current != null)
+        {
+            var candidate = Path.Combine(current.FullName, "strategies");
+            if (Directory.Exists(candidate))
+                return candidate;
+            current = current.Parent;
+        }
 
-        var relativeDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "strategies"));
-        return relativeDir;
+        var baseDir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (baseDir != null)
+        {
+            var candidate = Path.Combine(baseDir.FullName, "strategies");
+            if (Directory.Exists(candidate))
+                return candidate;
+            baseDir = baseDir.Parent;
+        }
+
+        return Path.Combine(Directory.GetCurrentDirectory(), "strategies");
     }
 
     [HttpGet("strategies")]

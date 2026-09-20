@@ -28,11 +28,25 @@ public class DailyAnalysisService
             var evaluator = scope.ServiceProvider.GetRequiredService<IConditionEvaluator>();
 
             // 1. Get strategies
-            var strategiesDir = Path.Combine(Directory.GetCurrentDirectory(), "strategies");
-            if (!Directory.Exists(strategiesDir))
+            string? strategiesDir = null;
+            var current = new DirectoryInfo(Directory.GetCurrentDirectory());
+            while (current != null)
             {
-                strategiesDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "strategies"));
+                var candidate = Path.Combine(current.FullName, "strategies");
+                if (Directory.Exists(candidate)) { strategiesDir = candidate; break; }
+                current = current.Parent;
             }
+            if (strategiesDir == null)
+            {
+                var baseDir = new DirectoryInfo(AppContext.BaseDirectory);
+                while (baseDir != null)
+                {
+                    var candidate = Path.Combine(baseDir.FullName, "strategies");
+                    if (Directory.Exists(candidate)) { strategiesDir = candidate; break; }
+                    baseDir = baseDir.Parent;
+                }
+            }
+            strategiesDir ??= Path.Combine(Directory.GetCurrentDirectory(), "strategies");
             
             if (!Directory.Exists(strategiesDir))
             {

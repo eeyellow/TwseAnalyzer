@@ -7,11 +7,45 @@ using TWSE.Web.Services;
 var builder = WebApplication.CreateBuilder(args);
 
 // Database
-var currentDataPath = Path.Combine(Directory.GetCurrentDirectory(), "data", "twse.db");
-var fallbackDataPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "data", "twse.db"));
-var dbPath = File.Exists(currentDataPath) ? currentDataPath : (File.Exists(fallbackDataPath) ? fallbackDataPath : currentDataPath);
+static string FindDatabasePath()
+{
+    var envPath = Environment.GetEnvironmentVariable("TWSE_DB_PATH");
+    if (!string.IsNullOrEmpty(envPath) && File.Exists(envPath))
+        return Path.GetFullPath(envPath);
+
+    var current = new DirectoryInfo(Directory.GetCurrentDirectory());
+    while (current != null)
+    {
+        var candidate = Path.Combine(current.FullName, "data", "twse.db");
+        if (File.Exists(candidate))
+            return candidate;
+
+        if (current.GetFiles("*.sln*").Any() || current.GetDirectories(".git").Any())
+            return candidate;
+
+        current = current.Parent;
+    }
+
+    var baseDir = new DirectoryInfo(AppContext.BaseDirectory);
+    while (baseDir != null)
+    {
+        var candidate = Path.Combine(baseDir.FullName, "data", "twse.db");
+        if (File.Exists(candidate))
+            return candidate;
+
+        if (baseDir.GetFiles("*.sln*").Any() || baseDir.GetDirectories(".git").Any())
+            return candidate;
+
+        baseDir = baseDir.Parent;
+    }
+
+    return Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "data", "twse.db"));
+}
+
+var dbPath = FindDatabasePath();
 var dbDir = Path.GetDirectoryName(dbPath);
 if (!string.IsNullOrEmpty(dbDir) && !Directory.Exists(dbDir)) Directory.CreateDirectory(dbDir);
+Console.WriteLine($"[TWSE.Web] Using database at: {dbPath}");
 var connectionString = $"Data Source={dbPath}";
 
 builder.Services.AddSingleton<IStockRepository>(new SqliteRepository(connectionString));
