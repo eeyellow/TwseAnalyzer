@@ -27,19 +27,24 @@ public class DailyAnalysisService
             var evaluator = scope.ServiceProvider.GetRequiredService<IConditionEvaluator>();
 
             // ==========================================
-            // 步驟 1: 迴歸驗證歷史訊號 (Forward Verification)
+            // 步驟 1: 高效批次載入全市場最近 120 天日線快照 (單次 SQL 查詢，記憶體分組)
             // ==========================================
-            await VerifyHistoricalSignalsAsync(stockRepo, targetDate);
+            var allHistories = await stockRepo.GetMarketRecentPricesBatchAsync(120);
 
             // ==========================================
-            // 步驟 2: 計算策略實戰勝率與自適應權重 (Adaptive Weights)
+            // 步驟 2: 迴歸驗證歷史訊號 (Forward Verification) - 使用記憶體快照
+            // ==========================================
+            await VerifyHistoricalSignalsAsync(stockRepo, targetDate, allHistories);
+
+            // ==========================================
+            // 步驟 3: 計算策略實戰勝率與自適應權重 (Adaptive Weights)
             // ==========================================
             var verificationSummary = await stockRepo.GetVerificationSummaryAsync(60);
             var strategyWeights = verificationSummary.StrategyMetrics
                 .ToDictionary(m => m.StrategyName, m => m.AdaptiveWeight, StringComparer.OrdinalIgnoreCase);
 
             // ==========================================
-            // 步驟 3: 載入策略模型定義
+            // 步驟 4: 載入策略模型定義
             // ==========================================
             string? strategiesDir = null;
             var current = new DirectoryInfo(Directory.GetCurrentDirectory());
@@ -79,11 +84,6 @@ public class DailyAnalysisService
                     loadedStrategies.Add((strategyName, config));
                 }
             }
-
-            // ==========================================
-            // 步驟 4: 高效批次載入全市場最近 120 天日線快照 (單次 SQL 查詢)
-            // ==========================================
-            var allHistories = await stockRepo.GetMarketRecentPricesBatchAsync(120);
 
             // 4.1 目前持股操作健檢
             var portfolio = await stockRepo.GetPortfolioAsync();
@@ -289,7 +289,7 @@ public class DailyAnalysisService
     /// <summary>
     /// 對歷史產生的訊號進行真實走勢迴歸結算 (T+1, T+3, T+5 勝負與報酬)
     /// </summary>
-    private async Task VerifyHistoricalSignalsAsync(IStockRepository stockRepo, DateTime currentDate)
+    private async Task VerifyHistoricalSignalsAsync(IStockRepository stockRepo, DateTime currentDate, Dictionary<string, List<OHLCV>> allHistories)
     {
         try
         {
@@ -303,8 +303,22 @@ public class DailyAnalysisService
                 if (!DateTime.TryParse(sig.SignalDate, out var signalDate)) continue;
                 if (signalDate.Date >= currentDate.Date) continue; // 當天的訊號次日才能驗證
 
-                // 取得從訊號日開始的日線
-                var forwardPrices = await stockRepo.GetDailyPricesAsync(sig.StockCode, signalDate);
+                // 優先使用記憶體快照比對價格，避免 N+1 磁碟查詢
+                List<OHLCV>? forwardPrices = null;
+                if (allHistories.TryGetValue(sig.StockCode, out var history))
+                {
+                    var sigIdx = history.FindIndex(p => p.Date.Date >= signalDate.Date);
+                    if (sigIdx >= 0)
+                    {
+                        forwardPrices = history.Skip(sigIdx).ToList();
+                    }
+                }
+
+                if (forwardPrices == null || forwardPrices.Count <= 1)
+                {
+                    forwardPrices = await stockRepo.GetDailyPricesAsync(sig.StockCode, signalDate);
+                }
+
                 if (forwardPrices.Count <= 1) continue; // 尚無次日行情
 
                 // 第 0 根為信號日，第 1 根為 T+1 日
