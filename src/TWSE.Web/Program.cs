@@ -50,6 +50,7 @@ var connectionString = $"Data Source={dbPath}";
 
 builder.Services.AddSingleton<IStockRepository>(new SqliteRepository(connectionString));
 builder.Services.AddSingleton<HttpClient>();
+builder.Services.AddSingleton<ITwseFetcher, TwseFetcher>();
 builder.Services.AddSingleton<IYahooFetcher, YahooFetcher>();
 builder.Services.AddSingleton<IDataUpdateService, DataUpdateService>();
 builder.Services.AddSingleton<IIndicatorService, SkenderIndicatorService>();

@@ -103,6 +103,22 @@ public class DailyUpdateService : BackgroundService
             using var scope = _serviceProvider.CreateScope();
             var updateService = scope.ServiceProvider.GetRequiredService<TWSE.Core.Data.IDataUpdateService>();
             var stockRepo = scope.ServiceProvider.GetRequiredService<TWSE.Core.Data.IStockRepository>();
+            var twseFetcher = scope.ServiceProvider.GetRequiredService<TWSE.Core.Data.ITwseFetcher>();
+
+            try
+            {
+                _logger.LogInformation("Syncing latest listed stocks and ETFs from TWSE/TPEx ISIN...");
+                var latestStocks = await twseFetcher.FetchListedStocksAsync();
+                if (latestStocks.Any())
+                {
+                    await stockRepo.InsertStocksAsync(latestStocks);
+                    _logger.LogInformation("Successfully synced {Count} stocks and ETFs to database.", latestStocks.Count);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to sync listed stocks list from TWSE, will use existing stocks in database.");
+            }
 
             var stocks = await stockRepo.GetAllStocksAsync();
             int success = 0;

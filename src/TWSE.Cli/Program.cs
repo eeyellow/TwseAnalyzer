@@ -1,4 +1,4 @@
-﻿using System.CommandLine;
+using System.CommandLine;
 using Microsoft.Extensions.DependencyInjection;
 using TWSE.Core.Data;
 using TWSE.Core.Indicators;
@@ -34,6 +34,7 @@ class Program
 
         rootCommand.AddCommand(new InitCommandFactory(serviceProvider).CreateCommand());
         rootCommand.AddCommand(new UpdateCommandFactory(serviceProvider).CreateCommand());
+        rootCommand.AddCommand(new SyncCommandFactory(serviceProvider).CreateCommand());
         rootCommand.AddCommand(new ScanCommandFactory(serviceProvider).CreateCommand());
         rootCommand.AddCommand(new BacktestCommandFactory(serviceProvider).CreateCommand());
         rootCommand.AddCommand(new AnalyzeCommandFactory(serviceProvider).CreateCommand());

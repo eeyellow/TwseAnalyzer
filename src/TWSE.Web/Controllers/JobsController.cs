@@ -11,18 +11,41 @@ public class JobsController : ControllerBase
     private readonly DailyAnalysisService _analysisService;
     private readonly IDataUpdateService _updateService;
     private readonly IStockRepository _stockRepo;
+    private readonly ITwseFetcher _twseFetcher;
     private readonly ILogger<JobsController> _logger;
 
     public JobsController(
         DailyAnalysisService analysisService,
         IDataUpdateService updateService,
         IStockRepository stockRepo,
+        ITwseFetcher twseFetcher,
         ILogger<JobsController> logger)
     {
         _analysisService = analysisService;
         _updateService = updateService;
         _stockRepo = stockRepo;
+        _twseFetcher = twseFetcher;
         _logger = logger;
+    }
+
+    [HttpPost("sync-stocks")]
+    public async Task<IActionResult> SyncStocks()
+    {
+        try
+        {
+            _logger.LogInformation("Manual trigger: Syncing listed stocks and ETFs from TWSE/TPEx ISIN...");
+            var latestStocks = await _twseFetcher.FetchListedStocksAsync();
+            if (latestStocks.Any())
+            {
+                await _stockRepo.InsertStocksAsync(latestStocks);
+            }
+            return Ok(new { message = $"個股與ETF代碼清單同步完成，共 {latestStocks.Count} 檔標的。", count = latestStocks.Count });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to sync stocks list");
+            return StatusCode(500, new { message = "同步標的代碼失敗", error = ex.Message });
+        }
     }
 
     [HttpPost("update-data")]
@@ -31,6 +54,20 @@ public class JobsController : ControllerBase
         _logger.LogInformation("Manual trigger: Starting daily data update in-process...");
         try
         {
+            // 1. 先同步最新掛牌股票與 ETF 清單 (包括新發行主動式 ETF 等)
+            try
+            {
+                var latestStocks = await _twseFetcher.FetchListedStocksAsync();
+                if (latestStocks.Any())
+                {
+                    await _stockRepo.InsertStocksAsync(latestStocks);
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to sync latest stocks list, continuing with database stocks.");
+            }
+
             var stocks = await _stockRepo.GetAllStocksAsync();
             var stockCodes = stocks.Select(s => s.Code).ToList();
             _logger.LogInformation("Updating historical data for {Count} stocks...", stockCodes.Count);

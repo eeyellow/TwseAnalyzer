@@ -22,6 +22,25 @@ public class UpdateCommandFactory
         {
             var updateService = _serviceProvider.GetRequiredService<IDataUpdateService>();
             var stockRepo = _serviceProvider.GetRequiredService<IStockRepository>();
+            var twseFetcher = _serviceProvider.GetRequiredService<ITwseFetcher>();
+
+            await AnsiConsole.Status()
+                .StartAsync("Syncing listed stocks and ETFs from TWSE/TPEx...", async ctx =>
+                {
+                    try
+                    {
+                        var latest = await twseFetcher.FetchListedStocksAsync();
+                        if (latest.Any())
+                        {
+                            await stockRepo.InsertStocksAsync(latest);
+                            AnsiConsole.MarkupLine($"[green]Synced {latest.Count} stocks & ETFs from TWSE.[/]");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        AnsiConsole.MarkupLine($"[yellow]Warning: Could not sync latest stocks list: {ex.Message}[/]");
+                    }
+                });
 
             var stocks = await stockRepo.GetAllStocksAsync();
             var stockCodes = stocks.Select(s => s.Code).ToList();
