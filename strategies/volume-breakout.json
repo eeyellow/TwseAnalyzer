@@ -1,0 +1,30 @@
+{
+  "name": "價量突破動能策略 (Volume Breakout)",
+  "description": "收盤價突破站穩月線(20MA)，成交量放大至20日均量1.5倍以上且收紅K棒、RSI大於50，捕捉主力強攻起漲點。",
+  "screen": [
+    "Close greater_than SMA(20)",
+    "Close greater_than Open",
+    "Volume greater_than VolumeSma(20) * 1.5",
+    "RSI(14) greater_than 50"
+  ],
+  "entry": [
+    "Close greater_than SMA(20)",
+    "Close greater_than Open",
+    "Volume greater_than VolumeSma(20) * 1.5",
+    "RSI(14) greater_than 50"
+  ],
+  "exit": [
+    "Close less_than SMA(20)",
+    "RSI(14) less_than 45"
+  ],
+  "backtest": {
+    "startDate": "2023-01-01",
+    "endDate": "2026-12-31",
+    "initialCapital": 3000000,
+    "positionSize": 3000000,
+    "commissionRate": 0.001425,
+    "taxRate": 0.003
+  },
+  "sortBy": "Volume",
+  "limit": 20
+}

@@ -25,8 +25,8 @@ public class DailyUpdateService : BackgroundService
         while (!stoppingToken.IsCancellationRequested)
         {
             var now = DateTime.Now;
-            // 每天晚上 18:00 定時觸發檢查
-            var nextRun = now.Date.AddHours(18);
+            // 每天晚上 20:00 (8 PM) 定時觸發檢查與盤前策略分析
+            var nextRun = now.Date.AddHours(20);
             if (now >= nextRun)
                 nextRun = nextRun.AddDays(1);
 
@@ -81,8 +81,8 @@ public class DailyUpdateService : BackgroundService
         var now = DateTime.Now;
         var target = now.Date;
 
-        // 如果目前還沒到傍晚 6 點，那麼「最新應該要有的資料」是昨天的營業日
-        if (now.Hour < 18)
+        // 如果目前還沒到晚上 8 點 (20:00)，那麼「最新應該要有的資料」是昨天的營業日
+        if (now.Hour < 20)
         {
              target = target.AddDays(-1);
         }

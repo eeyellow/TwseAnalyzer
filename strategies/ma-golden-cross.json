@@ -1,0 +1,28 @@
+{
+  "name": "均線黃金交叉策略 (MA Golden Cross)",
+  "description": "5日短均線上穿20日月線(生命線)，收盤價站穩月線且成交量放大，為最經典之趨勢跟隨波段多頭策略。",
+  "screen": [
+    "SMA(5) cross_above SMA(20)",
+    "Close greater_than SMA(20)",
+    "Volume greater_than VolumeSma(5)"
+  ],
+  "entry": [
+    "SMA(5) cross_above SMA(20)",
+    "Close greater_than SMA(20)",
+    "Volume greater_than VolumeSma(5)"
+  ],
+  "exit": [
+    "SMA(5) cross_below SMA(20)",
+    "Close less_than SMA(20)"
+  ],
+  "backtest": {
+    "startDate": "2023-01-01",
+    "endDate": "2026-12-31",
+    "initialCapital": 3000000,
+    "positionSize": 3000000,
+    "commissionRate": 0.001425,
+    "taxRate": 0.003
+  },
+  "sortBy": "Volume",
+  "limit": 20
+}

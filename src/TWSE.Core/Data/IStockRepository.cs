@@ -10,6 +10,7 @@ public interface IStockRepository
     
     Task InsertDailyPricesAsync(IEnumerable<OHLCV> prices);
     Task<List<OHLCV>> GetDailyPricesAsync(string stockCode, DateTime? startDate = null, DateTime? endDate = null);
+    Task<List<string>> GetStockCodesWithPricesAsync();
     
     Task<DateTime?> GetLatestPriceDateAsync(string stockCode);
 

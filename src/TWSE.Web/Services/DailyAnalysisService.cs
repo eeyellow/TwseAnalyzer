@@ -18,16 +18,15 @@ public class DailyAnalysisService
 
     public async Task RunAnalysisAsync(DateTime targetDate)
     {
-        _logger.LogInformation("Starting daily analysis for {TargetDate:yyyy-MM-dd}...", targetDate);
+        _logger.LogInformation("Starting daily analysis for {TargetDate:yyyy-MM-dd} (Holdings + Unowned Top 20 Buy/Sell)...", targetDate);
 
         try
         {
             using var scope = _serviceProvider.CreateScope();
             var stockRepo = scope.ServiceProvider.GetRequiredService<IStockRepository>();
-            var screener = scope.ServiceProvider.GetRequiredService<IScreener>();
             var evaluator = scope.ServiceProvider.GetRequiredService<IConditionEvaluator>();
 
-            // 1. Get strategies
+            // 1. 取得策略目錄
             string? strategiesDir = null;
             var current = new DirectoryInfo(Directory.GetCurrentDirectory());
             while (current != null)
@@ -54,90 +53,171 @@ public class DailyAnalysisService
                 return;
             }
 
+            // 載入所有策略 JSON
             var strategyFiles = Directory.GetFiles(strategiesDir, "*.json");
-            var signals = new List<DailySignal>();
-
-            // 2. Scan all stocks for Buy Signals
-            var screenerConfig = new ScreenerConfig { Limit = 30 };
+            var loadedStrategies = new List<(string Name, StrategyConfig Config)>();
             foreach (var file in strategyFiles)
             {
                 var strategyName = Path.GetFileNameWithoutExtension(file);
                 var json = await File.ReadAllTextAsync(file);
                 var config = JsonSerializer.Deserialize<StrategyConfig>(json);
-                if (config == null) continue;
-
-                var entryConditions = (config.Entry != null && config.Entry.Any())
-                    ? config.Entry
-                    : (config.Screen ?? new List<string>());
-
-                if (!entryConditions.Any()) continue;
-
-                screenerConfig.Screen = entryConditions;
-                var matched = await screener.ScanAsync(screenerConfig);
-
-                foreach (var match in matched)
+                if (config != null)
                 {
-                    // get the latest price directly from history for last_close
-                    var history = await stockRepo.GetDailyPricesAsync(match.Code);
-                    if (history.Count == 0) continue;
-                    
-                    var lastClose = history[^1].Close;
-
-                    signals.Add(new DailySignal
-                    {
-                        Date = targetDate,
-                        StockCode = match.Code,
-                        SignalType = "Buy",
-                        StrategyName = strategyName,
-                        SuggestedPrice = lastClose, // In the future this can be an estimated buy price
-                        LastClose = lastClose
-                    });
+                    loadedStrategies.Add((strategyName, config));
                 }
             }
 
-            // 3. Scan portfolio for Sell Signals
+            var allSignals = new List<DailySignal>();
+
+            // 2. 目前持股的操作分析 (Portfolio Analysis)
             var portfolio = await stockRepo.GetPortfolioAsync();
-            foreach (var file in strategyFiles)
+            var portfolioCodes = portfolio.Select(p => p.StockCode).ToHashSet();
+
+            foreach (var item in portfolio)
             {
-                var strategyName = Path.GetFileNameWithoutExtension(file);
-                var json = await File.ReadAllTextAsync(file);
-                var config = JsonSerializer.Deserialize<StrategyConfig>(json);
-                if (config == null || config.Exit == null || !config.Exit.Any()) continue;
+                var history = await stockRepo.GetDailyPricesAsync(item.StockCode);
+                if (history.Count == 0) continue;
 
-                foreach (var item in portfolio)
+                var lastIndex = history.Count - 1;
+                var lastClose = history[lastIndex].Close;
+
+                string action = "Hold";
+                string? triggeredStrategy = null;
+
+                // 先檢測 Exit 條件 (出場優先)
+                foreach (var (name, config) in loadedStrategies)
                 {
-                    // If user specified a strategy for this portfolio item, only evaluate matching strategy
-                    if (!string.IsNullOrEmpty(item.SelectedStrategy) &&
-                        !item.SelectedStrategy.Equals(Path.GetFileName(file), StringComparison.OrdinalIgnoreCase) &&
-                        !item.SelectedStrategy.Equals(strategyName, StringComparison.OrdinalIgnoreCase))
+                    if (config.Exit != null && config.Exit.Any())
                     {
-                        continue;
-                    }
-
-                    var history = await stockRepo.GetDailyPricesAsync(item.StockCode);
-                    if (history.Count == 0) continue;
-
-                    var lastIndex = history.Count - 1;
-                    if (evaluator.EvaluateAll(config.Exit, history, lastIndex))
-                    {
-                        signals.Add(new DailySignal
+                        if (evaluator.EvaluateAll(config.Exit, history, lastIndex))
                         {
-                            Date = targetDate,
-                            StockCode = item.StockCode,
-                            SignalType = "Sell",
-                            StrategyName = strategyName,
-                            SuggestedPrice = history[lastIndex].Close,
-                            LastClose = history[lastIndex].Close
-                        });
+                            action = "Sell";
+                            triggeredStrategy = name;
+                            break;
+                        }
+                    }
+                }
+
+                // 若未觸發出場，檢測 Entry 條件 (加碼買進)
+                if (action == "Hold")
+                {
+                    foreach (var (name, config) in loadedStrategies)
+                    {
+                        var entryConditions = (config.Entry != null && config.Entry.Any())
+                            ? config.Entry
+                            : (config.Screen ?? new List<string>());
+
+                        if (entryConditions.Any() && evaluator.EvaluateAll(entryConditions, history, lastIndex))
+                        {
+                            action = "Buy";
+                            triggeredStrategy = name;
+                            break;
+                        }
+                    }
+                }
+
+                allSignals.Add(new DailySignal
+                {
+                    Date = targetDate,
+                    StockCode = item.StockCode,
+                    SignalType = action, // "Hold", "Buy", "Sell"
+                    StrategyName = triggeredStrategy ?? "持股操作診斷",
+                    SuggestedPrice = lastClose,
+                    LastClose = lastClose
+                });
+            }
+
+            // 3. 掃描未持有股票，篩選出最推薦買進 (Top 20) 與最推薦賣出 (Top 20)
+            var activeCodes = await stockRepo.GetStockCodesWithPricesAsync();
+            var unownedCodes = activeCodes.Where(code => !portfolioCodes.Contains(code)).ToList();
+
+            var buyCandidates = new List<(string Code, decimal LastClose, decimal Volume, string StrategyName, double Score)>();
+            var sellCandidates = new List<(string Code, decimal LastClose, decimal Volume, string StrategyName, double Score)>();
+
+            foreach (var code in unownedCodes)
+            {
+                var history = await stockRepo.GetDailyPricesAsync(code);
+                if (history.Count < 20) continue; // 至少需 20 根 K 棒以計算均線與指標
+
+                var lastIndex = history.Count - 1;
+                var lastClose = history[lastIndex].Close;
+                var lastVol = history[lastIndex].Volume;
+
+                // 檢測推薦買進 (Entry)
+                foreach (var (name, config) in loadedStrategies)
+                {
+                    var entryConditions = (config.Entry != null && config.Entry.Any())
+                        ? config.Entry
+                        : (config.Screen ?? new List<string>());
+
+                    if (entryConditions.Any() && evaluator.EvaluateAll(entryConditions, history, lastIndex))
+                    {
+                        // 評分機制：以成交量與流動性作為主要排序依據
+                        double score = (double)lastVol;
+                        buyCandidates.Add((code, lastClose, lastVol, name, score));
+                        break;
+                    }
+                }
+
+                // 檢測推薦賣出 / 避開 (Exit)
+                foreach (var (name, config) in loadedStrategies)
+                {
+                    if (config.Exit != null && config.Exit.Any())
+                    {
+                        if (evaluator.EvaluateAll(config.Exit, history, lastIndex))
+                        {
+                            double score = (double)lastVol;
+                            sellCandidates.Add((code, lastClose, lastVol, name, score));
+                            break;
+                        }
                     }
                 }
             }
 
-            // 4. Save to Database
-            if (signals.Any())
+            // 取 Top 20 推薦買進 (依成交量/流動性排序)
+            var top20Buys = buyCandidates
+                .OrderByDescending(c => c.Score)
+                .Take(20)
+                .ToList();
+
+            foreach (var item in top20Buys)
             {
-                await stockRepo.InsertDailySignalsAsync(signals, targetDate);
-                _logger.LogInformation("Successfully inserted {Count} signals into the daily_signals table for {Date:yyyy-MM-dd}.", signals.Count, targetDate);
+                allSignals.Add(new DailySignal
+                {
+                    Date = targetDate,
+                    StockCode = item.Code,
+                    SignalType = "Buy",
+                    StrategyName = item.StrategyName,
+                    SuggestedPrice = item.LastClose,
+                    LastClose = item.LastClose
+                });
+            }
+
+            // 取 Top 20 推薦賣出 (依成交量/活躍度排序)
+            var top20Sells = sellCandidates
+                .OrderByDescending(c => c.Score)
+                .Take(20)
+                .ToList();
+
+            foreach (var item in top20Sells)
+            {
+                allSignals.Add(new DailySignal
+                {
+                    Date = targetDate,
+                    StockCode = item.Code,
+                    SignalType = "Sell",
+                    StrategyName = item.StrategyName,
+                    SuggestedPrice = item.LastClose,
+                    LastClose = item.LastClose
+                });
+            }
+
+            // 4. 存入資料庫
+            if (allSignals.Any())
+            {
+                await stockRepo.InsertDailySignalsAsync(allSignals, targetDate);
+                _logger.LogInformation("Daily analysis finished: {HoldingsCount} holdings evaluated, {BuyCount} unowned buys, {SellCount} unowned sells recorded for {Date:yyyy-MM-dd}.",
+                    portfolio.Count, top20Buys.Count, top20Sells.Count, targetDate);
             }
             else
             {

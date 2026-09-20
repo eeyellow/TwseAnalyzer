@@ -89,4 +89,35 @@ public class JsonConditionEvaluatorTests
         bool result = _evaluator.Evaluate("RSI(14) cross_above 30", data, 49);
         Assert.IsType<bool>(result);
     }
+
+    [Fact]
+    public void Evaluate_NewPracticalStrategiesConditions_ShouldWork()
+    {
+        var data = GenerateDummyData();
+        // 1. MA Golden Cross conditions
+        bool maCross = _evaluator.Evaluate("SMA(5) cross_above SMA(20)", data, 49);
+        bool maClose = _evaluator.Evaluate("Close greater_than SMA(20)", data, 49);
+        bool maVol = _evaluator.Evaluate("Volume greater_than VolumeSma(5)", data, 49);
+        Assert.IsType<bool>(maCross);
+        Assert.IsType<bool>(maClose);
+        Assert.IsType<bool>(maVol);
+
+        // 2. KD Oversold Turnaround conditions
+        bool kdK = _evaluator.Evaluate("K(9) less_than 30", data, 49);
+        bool kdD = _evaluator.Evaluate("D(9) less_than 30", data, 49);
+        bool kdCross = _evaluator.Evaluate("K(9) cross_above D(9)", data, 49);
+        Assert.IsType<bool>(kdK);
+        Assert.IsType<bool>(kdD);
+        Assert.IsType<bool>(kdCross);
+
+        // 3. Volume Breakout conditions
+        bool vbClose = _evaluator.Evaluate("Close greater_than SMA(20)", data, 49);
+        bool vbCandle = _evaluator.Evaluate("Close greater_than Open", data, 49);
+        bool vbVol = _evaluator.Evaluate("Volume greater_than VolumeSma(20) * 1.5", data, 49);
+        bool vbRsi = _evaluator.Evaluate("RSI(14) greater_than 50", data, 49);
+        Assert.IsType<bool>(vbClose);
+        Assert.IsType<bool>(vbCandle);
+        Assert.IsType<bool>(vbVol);
+        Assert.IsType<bool>(vbRsi);
+    }
 }

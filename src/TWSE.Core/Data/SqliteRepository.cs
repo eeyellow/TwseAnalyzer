@@ -76,6 +76,29 @@ public class SqliteRepository : IStockRepository
             await connection.ExecuteAsync("ALTER TABLE portfolio ADD COLUMN selected_strategy TEXT;");
         }
         catch { /* Column may already exist */ }
+
+        // 自動同步舊有 data/portfolio.json (若存在且資料庫為空)
+        try
+        {
+            var count = await connection.ExecuteScalarAsync<int>("SELECT COUNT(*) FROM portfolio;");
+            if (count == 0)
+            {
+                var jsonPath = Path.Combine(Directory.GetCurrentDirectory(), "data", "portfolio.json");
+                if (File.Exists(jsonPath))
+                {
+                    var json = await File.ReadAllTextAsync(jsonPath);
+                    var items = System.Text.Json.JsonSerializer.Deserialize<List<PortfolioItem>>(json);
+                    if (items != null && items.Any())
+                    {
+                        foreach (var item in items)
+                        {
+                            await UpdatePortfolioItemAsync(item);
+                        }
+                    }
+                }
+            }
+        }
+        catch { /* Ignore migration errors */ }
     }
 
     public async Task InsertStocksAsync(IEnumerable<StockInfo> stocks)
@@ -154,6 +177,14 @@ public class SqliteRepository : IStockRepository
             Close = (decimal)d.close,
             Volume = (decimal)d.volume
         }).ToList();
+    }
+
+    public async Task<List<string>> GetStockCodesWithPricesAsync()
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        var sql = "SELECT DISTINCT code FROM daily_prices";
+        var codes = await connection.QueryAsync<string>(sql);
+        return codes.ToList();
     }
 
     public async Task<DateTime?> GetLatestPriceDateAsync(string stockCode)

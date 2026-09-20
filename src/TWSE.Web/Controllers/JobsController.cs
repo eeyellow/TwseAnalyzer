@@ -120,7 +120,7 @@ public class JobsController : ControllerBase
         var now = DateTime.Now;
         var target = now.Date;
 
-        if (now.Hour < 18)
+        if (now.Hour < 20)
         {
             target = target.AddDays(-1);
         }

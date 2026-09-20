@@ -1,0 +1,28 @@
+{
+  "name": "KD超賣區黃金交叉策略 (KD Oversold Turnaround)",
+  "description": "KD指標於30以下超賣區形成黃金交叉，捕捉股價超跌後的低檔強勁反彈轉折點，高檔80以上死亡交叉出場。",
+  "screen": [
+    "K(9) less_than 30",
+    "D(9) less_than 30",
+    "K(9) cross_above D(9)"
+  ],
+  "entry": [
+    "K(9) less_than 30",
+    "D(9) less_than 30",
+    "K(9) cross_above D(9)"
+  ],
+  "exit": [
+    "K(9) greater_than 80",
+    "K(9) cross_below D(9)"
+  ],
+  "backtest": {
+    "startDate": "2023-01-01",
+    "endDate": "2026-12-31",
+    "initialCapital": 3000000,
+    "positionSize": 3000000,
+    "commissionRate": 0.001425,
+    "taxRate": 0.003
+  },
+  "sortBy": "Volume",
+  "limit": 20
+}
