@@ -18,7 +18,7 @@ public class DailyAnalysisService
 
     public async Task RunAnalysisAsync(DateTime targetDate)
     {
-        _logger.LogInformation("Starting daily analysis for {TargetDate:yyyy-MM-dd} (Holdings + Unowned Top 20 Buy/Sell)...", targetDate);
+        _logger.LogInformation("Starting adaptive daily analysis & verification for {TargetDate:yyyy-MM-dd}...", targetDate);
 
         try
         {
@@ -26,7 +26,21 @@ public class DailyAnalysisService
             var stockRepo = scope.ServiceProvider.GetRequiredService<IStockRepository>();
             var evaluator = scope.ServiceProvider.GetRequiredService<IConditionEvaluator>();
 
-            // 1. 取得策略目錄
+            // ==========================================
+            // 步驟 1: 迴歸驗證歷史訊號 (Forward Verification)
+            // ==========================================
+            await VerifyHistoricalSignalsAsync(stockRepo, targetDate);
+
+            // ==========================================
+            // 步驟 2: 計算策略實戰勝率與自適應權重 (Adaptive Weights)
+            // ==========================================
+            var verificationSummary = await stockRepo.GetVerificationSummaryAsync(60);
+            var strategyWeights = verificationSummary.StrategyMetrics
+                .ToDictionary(m => m.StrategyName, m => m.AdaptiveWeight, StringComparer.OrdinalIgnoreCase);
+
+            // ==========================================
+            // 步驟 3: 載入策略模型定義
+            // ==========================================
             string? strategiesDir = null;
             var current = new DirectoryInfo(Directory.GetCurrentDirectory());
             while (current != null)
@@ -53,7 +67,6 @@ public class DailyAnalysisService
                 return;
             }
 
-            // 載入所有策略 JSON
             var strategyFiles = Directory.GetFiles(strategiesDir, "*.json");
             var loadedStrategies = new List<(string Name, StrategyConfig Config)>();
             foreach (var file in strategyFiles)
@@ -67,16 +80,24 @@ public class DailyAnalysisService
                 }
             }
 
-            var allSignals = new List<DailySignal>();
+            // ==========================================
+            // 步驟 4: 高效批次載入全市場最近 120 天日線快照 (單次 SQL 查詢)
+            // ==========================================
+            var allHistories = await stockRepo.GetMarketRecentPricesBatchAsync(120);
 
-            // 2. 目前持股的操作分析 (Portfolio Analysis)
+            // 4.1 目前持股操作健檢
             var portfolio = await stockRepo.GetPortfolioAsync();
             var portfolioCodes = portfolio.Select(p => p.StockCode).ToHashSet();
+            var allSignals = new List<DailySignal>();
+            var newTrackingItems = new List<SignalTrackingItem>();
 
             foreach (var item in portfolio)
             {
-                var history = await stockRepo.GetDailyPricesAsync(item.StockCode);
-                if (history.Count == 0) continue;
+                if (!allHistories.TryGetValue(item.StockCode, out var history) || history.Count == 0)
+                {
+                    history = await stockRepo.GetDailyPricesAsync(item.StockCode);
+                }
+                if (history == null || history.Count == 0) continue;
 
                 var lastIndex = history.Count - 1;
                 var lastClose = history[lastIndex].Close;
@@ -84,7 +105,7 @@ public class DailyAnalysisService
                 string action = "Hold";
                 string? triggeredStrategy = null;
 
-                // 先檢測 Exit 條件 (出場優先)
+                // 先檢測 Exit (出場優先)
                 foreach (var (name, config) in loadedStrategies)
                 {
                     if (config.Exit != null && config.Exit.Any())
@@ -98,7 +119,7 @@ public class DailyAnalysisService
                     }
                 }
 
-                // 若未觸發出場，檢測 Entry 條件 (加碼買進)
+                // 若未出場，檢測 Entry (加碼買進)
                 if (action == "Hold")
                 {
                     foreach (var (name, config) in loadedStrategies)
@@ -120,30 +141,33 @@ public class DailyAnalysisService
                 {
                     Date = targetDate,
                     StockCode = item.StockCode,
-                    SignalType = action, // "Hold", "Buy", "Sell"
+                    SignalType = action,
                     StrategyName = triggeredStrategy ?? "持股操作診斷",
                     SuggestedPrice = lastClose,
                     LastClose = lastClose
                 });
             }
 
-            // 3. 掃描未持有股票，篩選出最推薦買進 (Top 20) 與最推薦賣出 (Top 20)
-            var activeCodes = await stockRepo.GetStockCodesWithPricesAsync();
-            var unownedCodes = activeCodes.Where(code => !portfolioCodes.Contains(code)).ToList();
+            // ==========================================
+            // 步驟 5: 平行運算未持有個股，套用自適應權重推薦 Top 20 買進與賣出
+            // ==========================================
+            var unownedHistories = allHistories
+                .Where(kvp => !portfolioCodes.Contains(kvp.Key) && kvp.Value.Count >= 20)
+                .ToList();
 
-            var buyCandidates = new List<(string Code, decimal LastClose, decimal Volume, string StrategyName, double Score)>();
-            var sellCandidates = new List<(string Code, decimal LastClose, decimal Volume, string StrategyName, double Score)>();
+            var buyCandidates = new System.Collections.Concurrent.ConcurrentBag<(string Code, decimal LastClose, decimal Volume, string StrategyName, double WeightedScore)>();
+            var sellCandidates = new System.Collections.Concurrent.ConcurrentBag<(string Code, decimal LastClose, decimal Volume, string StrategyName, double WeightedScore)>();
+            var allMarketSignals = new System.Collections.Concurrent.ConcurrentBag<SignalTrackingItem>();
 
-            foreach (var code in unownedCodes)
+            Parallel.ForEach(unownedHistories, kvp =>
             {
-                var history = await stockRepo.GetDailyPricesAsync(code);
-                if (history.Count < 20) continue; // 至少需 20 根 K 棒以計算均線與指標
-
+                var code = kvp.Key;
+                var history = kvp.Value;
                 var lastIndex = history.Count - 1;
                 var lastClose = history[lastIndex].Close;
                 var lastVol = history[lastIndex].Volume;
 
-                // 檢測推薦買進 (Entry)
+                // 檢測買進條件
                 foreach (var (name, config) in loadedStrategies)
                 {
                     var entryConditions = (config.Entry != null && config.Entry.Any())
@@ -152,31 +176,59 @@ public class DailyAnalysisService
 
                     if (entryConditions.Any() && evaluator.EvaluateAll(entryConditions, history, lastIndex))
                     {
-                        // 評分機制：以成交量與流動性作為主要排序依據
-                        double score = (double)lastVol;
-                        buyCandidates.Add((code, lastClose, lastVol, name, score));
+                        // 取得自適應動態權重
+                        strategyWeights.TryGetValue(name, out var adaptWeight);
+                        if (adaptWeight <= 0) adaptWeight = 1.0m;
+
+                        // 綜合推薦分數 = 成交量 (流動性) * 策略實戰勝率權重
+                        double weightedScore = (double)lastVol * (double)adaptWeight;
+                        buyCandidates.Add((code, lastClose, lastVol, name, weightedScore));
+
+                        // 收集全市場追蹤清單
+                        allMarketSignals.Add(new SignalTrackingItem
+                        {
+                            SignalDate = targetDate.ToString("yyyy-MM-dd"),
+                            StockCode = code,
+                            SignalType = "Buy",
+                            StrategyName = name,
+                            EntryPrice = lastClose,
+                            Status = "Pending"
+                        });
                         break;
                     }
                 }
 
-                // 檢測推薦賣出 / 避開 (Exit)
+                // 檢測賣出 / 避開條件
                 foreach (var (name, config) in loadedStrategies)
                 {
                     if (config.Exit != null && config.Exit.Any())
                     {
                         if (evaluator.EvaluateAll(config.Exit, history, lastIndex))
                         {
-                            double score = (double)lastVol;
-                            sellCandidates.Add((code, lastClose, lastVol, name, score));
+                            strategyWeights.TryGetValue(name, out var adaptWeight);
+                            if (adaptWeight <= 0) adaptWeight = 1.0m;
+
+                            double weightedScore = (double)lastVol * (double)adaptWeight;
+                            sellCandidates.Add((code, lastClose, lastVol, name, weightedScore));
+
+                            allMarketSignals.Add(new SignalTrackingItem
+                            {
+                                SignalDate = targetDate.ToString("yyyy-MM-dd"),
+                                StockCode = code,
+                                SignalType = "Sell",
+                                StrategyName = name,
+                                EntryPrice = lastClose,
+                                Status = "Pending"
+                            });
                             break;
                         }
                     }
                 }
-            }
+            });
 
-            // 取 Top 20 推薦買進 (依成交量/流動性排序)
+            // 挑選 Top 20 推薦買進
             var top20Buys = buyCandidates
-                .OrderByDescending(c => c.Score)
+                .OrderByDescending(c => c.WeightedScore)
                 .Take(20)
                 .ToList();
 
@@ -193,9 +245,9 @@ public class DailyAnalysisService
                 });
             }
 
-            // 取 Top 20 推薦賣出 (依成交量/活躍度排序)
+            // 挑選 Top 20 推薦賣出
             var top20Sells = sellCandidates
-                .OrderByDescending(c => c.Score)
+                .OrderByDescending(c => c.WeightedScore)
                 .Take(20)
                 .ToList();
 
@@ -212,21 +264,104 @@ public class DailyAnalysisService
                 });
             }
 
-            // 4. 存入資料庫
+            // ==========================================
+            // 步驟 6: 批次寫入資料庫
+            // ==========================================
             if (allSignals.Any())
             {
                 await stockRepo.InsertDailySignalsAsync(allSignals, targetDate);
-                _logger.LogInformation("Daily analysis finished: {HoldingsCount} holdings evaluated, {BuyCount} unowned buys, {SellCount} unowned sells recorded for {Date:yyyy-MM-dd}.",
-                    portfolio.Count, top20Buys.Count, top20Sells.Count, targetDate);
             }
-            else
+
+            if (allMarketSignals.Any())
             {
-                _logger.LogInformation("No signals generated for {Date:yyyy-MM-dd}.", targetDate);
+                await stockRepo.BatchInsertSignalTrackingAsync(allMarketSignals);
             }
+
+            _logger.LogInformation("Daily analysis complete: {HoldingsCount} holdings, {BuyCount} unowned top buys, {SellCount} top sells, {TrackCount} signals tracked.",
+                portfolio.Count, top20Buys.Count, top20Sells.Count, allMarketSignals.Count);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed during daily analysis.");
+        }
+    }
+
+    /// <summary>
+    /// 對歷史產生的訊號進行真實走勢迴歸結算 (T+1, T+3, T+5 勝負與報酬)
+    /// </summary>
+    private async Task VerifyHistoricalSignalsAsync(IStockRepository stockRepo, DateTime currentDate)
+    {
+        try
+        {
+            var pendingSignals = await stockRepo.GetPendingSignalTrackingAsync();
+            if (!pendingSignals.Any()) return;
+
+            var updatedSignals = new List<SignalTrackingItem>();
+
+            foreach (var sig in pendingSignals)
+            {
+                if (!DateTime.TryParse(sig.SignalDate, out var signalDate)) continue;
+                if (signalDate.Date >= currentDate.Date) continue; // 當天的訊號次日才能驗證
+
+                // 取得從訊號日開始的日線
+                var forwardPrices = await stockRepo.GetDailyPricesAsync(sig.StockCode, signalDate);
+                if (forwardPrices.Count <= 1) continue; // 尚無次日行情
+
+                // 第 0 根為信號日，第 1 根為 T+1 日
+                var day1 = forwardPrices[1];
+                sig.NextOpen = day1.Open;
+                sig.NextClose = day1.Close;
+
+                // 計算 T+1 報酬率 (若是賣出/避開訊號，跌越多視為做空/避險收益越大)
+                if (sig.SignalType == "Sell")
+                {
+                    sig.Return1D = sig.EntryPrice > 0 ? (sig.EntryPrice - day1.Close) / sig.EntryPrice : 0;
+                    sig.IsWin = sig.Return1D > 0 ? 1 : 0;
+                }
+                else
+                {
+                    sig.Return1D = sig.EntryPrice > 0 ? (day1.Close - sig.EntryPrice) / sig.EntryPrice : 0;
+                    sig.IsWin = sig.Return1D > 0 ? 1 : 0;
+                }
+
+                // T+3 表現
+                if (forwardPrices.Count >= 4)
+                {
+                    var day3 = forwardPrices[3];
+                    sig.Return3D = sig.SignalType == "Sell"
+                        ? (sig.EntryPrice - day3.Close) / sig.EntryPrice
+                        : (day3.Close - sig.EntryPrice) / sig.EntryPrice;
+                }
+
+                // T+5 表現與最大浮盈/浮虧 (MFE / MAE)
+                if (forwardPrices.Count >= 6)
+                {
+                    var day5 = forwardPrices[5];
+                    sig.Return5D = sig.SignalType == "Sell"
+                        ? (sig.EntryPrice - day5.Close) / sig.EntryPrice
+                        : (day5.Close - sig.EntryPrice) / sig.EntryPrice;
+
+                    var window5 = forwardPrices.Skip(1).Take(5).ToList();
+                    var maxHigh = window5.Max(b => b.High);
+                    var minLow = window5.Min(b => b.Low);
+
+                    sig.MaxReturn5D = (maxHigh - sig.EntryPrice) / sig.EntryPrice;
+                    sig.MaxDrawdown5D = (minLow - sig.EntryPrice) / sig.EntryPrice;
+                    sig.Status = "Verified";
+                }
+
+                updatedSignals.Add(sig);
+            }
+
+            if (updatedSignals.Any())
+            {
+                await stockRepo.BatchUpdateSignalTrackingAsync(updatedSignals);
+                _logger.LogInformation("Verified {Count} historical signals against market performance.", updatedSignals.Count);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed during historical signal verification.");
         }
     }
 }

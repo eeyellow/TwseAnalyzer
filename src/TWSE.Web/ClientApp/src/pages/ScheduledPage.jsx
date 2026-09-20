@@ -5,8 +5,11 @@ import {
   fetchStocks,
   runUpdateJob,
   runAnalysisJob,
+  getVerificationSummary,
+  getVerificationHistory,
+  runVerificationJob,
 } from '../api';
-import { fmtCurrency, fmtDate } from '../utils/formatters';
+import { fmtCurrency, fmtDate, fmtPercent } from '../utils/formatters';
 import { useToast } from '../context/ToastContext';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
@@ -23,7 +26,11 @@ import {
   TrendingUp,
   TrendingDown,
   AlertCircle,
+  BrainCircuit,
+  Award,
+  Sliders,
   CheckCircle2,
+  XCircle,
   HelpCircle,
 } from 'lucide-react';
 
@@ -38,11 +45,16 @@ export default function ScheduledPage({ onOpenChart, onNavigate }) {
   const [recommendedSells, setRecommendedSells] = useState([]);
   const [reportDate, setReportDate] = useState(null);
 
+  // Verification & Adaptive Learning State
+  const [verificationSummary, setVerificationSummary] = useState(null);
+  const [verificationHistory, setVerificationHistory] = useState([]);
+  const [verifying, setVerifying] = useState(false);
+
   // Loading actions
   const [updating, setUpdating] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
 
-  // Active Tab: 'holdings' | 'buys' | 'sells' | 'all'
+  // Active Tab: 'holdings' | 'buys' | 'sells' | 'verification' | 'all'
   const [activeTab, setActiveTab] = useState('holdings');
 
   // Filters & Pagination
@@ -54,10 +66,12 @@ export default function ScheduledPage({ onOpenChart, onNavigate }) {
   const fetchReport = useCallback(async () => {
     setLoading(true);
     try {
-      const [p, report, stocks] = await Promise.all([
+      const [p, report, stocks, vSummary, vHistory] = await Promise.all([
         getPortfolio(),
         getDailyReport(),
         fetchStocks(),
+        getVerificationSummary(60).catch(() => null),
+        getVerificationHistory(100).catch(() => []),
       ]);
       setPortfolio(p || []);
       setAllStocks(stocks || []);
@@ -68,6 +82,8 @@ export default function ScheduledPage({ onOpenChart, onNavigate }) {
         setRecommendedBuys(report.recommendedBuys || []);
         setRecommendedSells(report.recommendedSells || []);
       }
+      if (vSummary) setVerificationSummary(vSummary);
+      if (vHistory) setVerificationHistory(vHistory);
     } catch (err) {
       toast.error(`載入報告失敗: ${err.message}`);
     } finally {
@@ -94,15 +110,31 @@ export default function ScheduledPage({ onOpenChart, onNavigate }) {
 
   const handleRunAnalysis = async () => {
     setAnalyzing(true);
-    toast.info('開始執行持股健檢與未持股 Top 20 買賣推薦分析...');
+    toast.info('開始執行全市場分析、歷史迴歸驗證與動態權重自適應...');
     try {
       const res = await runAnalysisJob();
-      toast.success(res.message || '盤前策略分析完成！');
+      toast.success(res.message || '分析與自適應驗證完成！');
       await fetchReport();
     } catch (e) {
       toast.error(`分析失敗: ${e.message}`);
     } finally {
       setAnalyzing(false);
+    }
+  };
+
+  const handleRunVerification = async () => {
+    setVerifying(true);
+    toast.info('重新結算所有歷史訊號實戰勝率與模型權重...');
+    try {
+      const res = await runVerificationJob();
+      toast.success(res.message || '迴歸驗證與模型權重更新完成！');
+      if (res.summary) setVerificationSummary(res.summary);
+      const vHistory = await getVerificationHistory(100);
+      setVerificationHistory(vHistory || []);
+    } catch (e) {
+      toast.error(`驗證失敗: ${e.message}`);
+    } finally {
+      setVerifying(false);
     }
   };
 
@@ -140,6 +172,8 @@ export default function ScheduledPage({ onOpenChart, onNavigate }) {
     currentList = recommendedBuys;
   } else if (activeTab === 'sells') {
     currentList = recommendedSells;
+  } else if (activeTab === 'verification') {
+    currentList = verificationHistory;
   } else {
     currentList = combinedSignals;
   }
@@ -169,6 +203,7 @@ export default function ScheduledPage({ onOpenChart, onNavigate }) {
         ...recommendedBuys.map((s) => s.strategyName),
         ...recommendedSells.map((s) => s.strategyName),
         ...combinedSignals.map((s) => s.strategyName),
+        ...verificationHistory.map((s) => s.strategyName),
       ].filter(Boolean)
     ),
   ];
@@ -180,7 +215,7 @@ export default function ScheduledPage({ onOpenChart, onNavigate }) {
         <div>
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-              每日盤前策略分析
+              每日盤前策略分析與自適應學習
             </h1>
             {reportDate && (
               <span className="text-xs px-2.5 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-medium">
@@ -190,7 +225,9 @@ export default function ScheduledPage({ onOpenChart, onNavigate }) {
           </div>
           <div className="flex items-center gap-1.5 text-xs text-sky-600 dark:text-sky-400 mt-1 font-medium">
             <Clock className="w-3.5 h-3.5" />
-            <span>定時排程：每天晚上 20:00 (8:00 PM) 自動執行分析</span>
+            <span>
+              定時排程：每天晚上 20:00 (8:00 PM) 自動執行全盤分析與次日迴歸驗證
+            </span>
           </div>
         </div>
 
@@ -200,7 +237,7 @@ export default function ScheduledPage({ onOpenChart, onNavigate }) {
             size="sm"
             onClick={handleRunUpdate}
             loading={updating}
-            disabled={updating || analyzing}
+            disabled={updating || analyzing || verifying}
             icon={RefreshCw}
           >
             更新收盤報價
@@ -210,7 +247,7 @@ export default function ScheduledPage({ onOpenChart, onNavigate }) {
             size="sm"
             onClick={handleRunAnalysis}
             loading={analyzing}
-            disabled={updating || analyzing}
+            disabled={updating || analyzing || verifying}
             icon={Zap}
           >
             立即手動運算
@@ -269,6 +306,21 @@ export default function ScheduledPage({ onOpenChart, onNavigate }) {
 
             <button
               onClick={() => {
+                setActiveTab('verification');
+                setPage(1);
+              }}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5 ${
+                activeTab === 'verification'
+                  ? 'bg-white dark:bg-[#111827] text-purple-600 dark:text-purple-400 shadow-sm'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <BrainCircuit className="w-3.5 h-3.5 text-purple-500" />
+              迴歸驗證與自適應學習 ({verificationHistory.length})
+            </button>
+
+            <button
+              onClick={() => {
                 setActiveTab('all');
                 setPage(1);
               }}
@@ -320,6 +372,307 @@ export default function ScheduledPage({ onOpenChart, onNavigate }) {
         {loading ? (
           <div className="py-20 flex justify-center items-center">
             <div className="w-8 h-8 rounded-full border-2 border-sky-500 border-t-transparent animate-spin" />
+          </div>
+        ) : activeTab === 'verification' ? (
+          /* TAB: 迴歸驗證與模型自適應學習面板 */
+          <div className="space-y-6">
+            {/* Top Verification Stats Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800">
+                <div className="flex items-center justify-between text-xs text-slate-500 mb-1">
+                  <span>歷史訊號結算總數</span>
+                  <Award className="w-4 h-4 text-sky-500" />
+                </div>
+                <div className="text-xl font-bold font-mono text-slate-900 dark:text-white">
+                  {verificationSummary?.totalVerifiedSignals || 0} /{' '}
+                  {verificationSummary?.totalTrackedSignals || 0} 筆
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  最近 60 日全市場真實追蹤
+                </p>
+              </div>
+
+              <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800">
+                <div className="flex items-center justify-between text-xs text-slate-500 mb-1">
+                  <span>T+1 隔日沖勝率</span>
+                  <TrendingUp className="w-4 h-4 text-emerald-500" />
+                </div>
+                <div className="text-xl font-bold font-mono text-emerald-500">
+                  {fmtPercent(
+                    (verificationSummary?.overallWinRate1D || 0) * 100
+                  )}
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  次日平均報酬率：
+                  <span className="font-mono font-medium ml-1">
+                    {fmtPercent(
+                      (verificationSummary?.overallAvgReturn1D || 0) * 100
+                    )}
+                  </span>
+                </p>
+              </div>
+
+              <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800">
+                <div className="flex items-center justify-between text-xs text-slate-500 mb-1">
+                  <span>T+3 短波段勝率</span>
+                  <BrainCircuit className="w-4 h-4 text-purple-500" />
+                </div>
+                <div className="text-xl font-bold font-mono text-purple-500">
+                  {fmtPercent(
+                    (verificationSummary?.overallWinRate3D || 0) * 100
+                  )}
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  3日平均報酬率：
+                  <span className="font-mono font-medium ml-1">
+                    {fmtPercent(
+                      (verificationSummary?.overallAvgReturn3D || 0) * 100
+                    )}
+                  </span>
+                </p>
+              </div>
+
+              <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 flex flex-col justify-between">
+                <div className="flex items-center justify-between text-xs text-slate-500">
+                  <span>閉環自適應優化</span>
+                  <Sliders className="w-4 h-4 text-amber-500" />
+                </div>
+                <div className="mt-2">
+                  <Button
+                    variant="outline"
+                    size="xs"
+                    className="w-full"
+                    onClick={handleRunVerification}
+                    loading={verifying}
+                    icon={RefreshCw}
+                  >
+                    重新計算模型動態權重
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            {/* Strategy Weights Table */}
+            <div className="space-y-3">
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <span>各策略組合實戰表現與自適應權重</span>
+                <span className="text-xs font-normal text-slate-400">
+                  （系統根據近期實戰勝率自動調升或調降策略在 Top 20 的排序權重）
+                </span>
+              </h3>
+
+              <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 dark:bg-slate-900/80 border-b border-slate-200 dark:border-slate-800 text-slate-400 font-semibold">
+                    <tr>
+                      <th className="py-3 px-4">策略模型名稱</th>
+                      <th className="py-3 px-4 text-right">追蹤訊號</th>
+                      <th className="py-3 px-4 text-right">已結算筆數</th>
+                      <th className="py-3 px-4 text-right">T+1 實戰勝率</th>
+                      <th className="py-3 px-4 text-right">T+1 平均報酬</th>
+                      <th className="py-3 px-4 text-right">盈虧比</th>
+                      <th className="py-3 px-4 text-center">
+                        動態自適應權重乘數
+                      </th>
+                      <th className="py-3 px-4">模型調度狀態</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {(verificationSummary?.strategyMetrics || []).map((sm) => {
+                      const isHigh = sm.adaptiveWeight > 1.0;
+                      const isLow = sm.adaptiveWeight < 1.0;
+
+                      return (
+                        <tr
+                          key={sm.strategyName}
+                          className="hover:bg-slate-50/60 dark:hover:bg-slate-800/30"
+                        >
+                          <td className="py-3 px-4 font-semibold text-slate-800 dark:text-slate-200">
+                            {sm.strategyName}
+                          </td>
+                          <td className="py-3 px-4 text-right font-mono">
+                            {sm.totalSignals}
+                          </td>
+                          <td className="py-3 px-4 text-right font-mono">
+                            {sm.verifiedSignals}
+                          </td>
+                          <td className="py-3 px-4 text-right font-mono font-bold">
+                            <span
+                              className={
+                                sm.winRate >= 0.5
+                                  ? 'text-emerald-500'
+                                  : 'text-rose-500'
+                              }
+                            >
+                              {fmtPercent(sm.winRate * 100)}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-right font-mono">
+                            {fmtPercent(sm.avgReturn1D * 100)}
+                          </td>
+                          <td className="py-3 px-4 text-right font-mono">
+                            {sm.profitFactor.toFixed(2)}
+                          </td>
+                          <td className="py-3 px-4 text-center font-mono font-bold">
+                            <span
+                              className={`px-2 py-0.5 rounded text-xs ${
+                                isHigh
+                                  ? 'bg-emerald-500/10 text-emerald-500'
+                                  : isLow
+                                  ? 'bg-rose-500/10 text-rose-500'
+                                  : 'bg-slate-100 dark:bg-slate-800 text-slate-400'
+                              }`}
+                            >
+                              x{sm.adaptiveWeight.toFixed(2)}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4">
+                            {sm.statusRecommendation === 'ScaledUp' && (
+                              <Badge variant="buy" size="sm">
+                                🚀 自動加權擴大
+                              </Badge>
+                            )}
+                            {sm.statusRecommendation === 'Demoted' && (
+                              <Badge variant="sell" size="sm">
+                                ⚠️ 自動降權觀察
+                              </Badge>
+                            )}
+                            {sm.statusRecommendation === 'Hibernating' && (
+                              <Badge variant="sell" size="sm">
+                                ❄️ 暫停休眠冷卻
+                              </Badge>
+                            )}
+                            {sm.statusRecommendation === 'Active' && (
+                              <Badge variant="neutral" size="sm">
+                                正常運算
+                              </Badge>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Historical Verification Track Log */}
+            <div className="space-y-3">
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center justify-between">
+                <span>歷史訊號逐筆迴歸驗證軌跡 (前 100 筆)</span>
+                <span className="text-xs font-normal text-slate-400">
+                  比對每日分析當初推薦價與後續真實市場走勢
+                </span>
+              </h3>
+
+              <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
+                <table className="w-full text-left text-xs">
+                  <thead className="bg-slate-50 dark:bg-slate-900/80 border-b border-slate-200 dark:border-slate-800 text-slate-400 font-semibold">
+                    <tr>
+                      <th className="py-3 px-4">訊號日期</th>
+                      <th className="py-3 px-4">股票標的</th>
+                      <th className="py-3 px-4">方向</th>
+                      <th className="py-3 px-4">觸發策略</th>
+                      <th className="py-3 px-4 text-right">推薦進場價</th>
+                      <th className="py-3 px-4 text-right">T+1 收盤價</th>
+                      <th className="py-3 px-4 text-right">T+1 實際報酬</th>
+                      <th className="py-3 px-4 text-right">T+3 報酬</th>
+                      <th className="py-3 px-4 text-center">實戰驗證結果</th>
+                      <th className="py-3 px-4 text-right">線圖</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {paged.map((item) => {
+                      const isWin = item.isWin === 1;
+                      const hasReturn = item.return1D !== null;
+
+                      return (
+                        <tr
+                          key={item.id}
+                          className="hover:bg-slate-50/60 dark:hover:bg-slate-800/30"
+                        >
+                          <td className="py-3 px-4 font-mono text-slate-500">
+                            {item.signalDate}
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className="font-mono font-bold text-sky-600 dark:text-sky-400 mr-1.5">
+                              {item.stockCode}
+                            </span>
+                            <span className="font-medium text-slate-800 dark:text-slate-200">
+                              {item.stockName}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4">
+                            {item.signalType === 'Buy' ? (
+                              <Badge variant="buy" size="xs">
+                                買進
+                              </Badge>
+                            ) : (
+                              <Badge variant="sell" size="xs">
+                                賣出
+                              </Badge>
+                            )}
+                          </td>
+                          <td className="py-3 px-4 font-mono text-slate-500">
+                            {item.strategyName}
+                          </td>
+                          <td className="py-3 px-4 text-right font-mono font-bold text-slate-900 dark:text-white">
+                            {item.entryPrice?.toFixed(2)}
+                          </td>
+                          <td className="py-3 px-4 text-right font-mono">
+                            {item.nextClose?.toFixed(2) || '-'}
+                          </td>
+                          <td className="py-3 px-4 text-right font-mono font-bold">
+                            {hasReturn ? (
+                              <span
+                                className={
+                                  (item.return1D || 0) >= 0
+                                    ? 'text-emerald-500'
+                                    : 'text-rose-500'
+                                }
+                              >
+                                {fmtPercent((item.return1D || 0) * 100)}
+                              </span>
+                            ) : (
+                              <span className="text-slate-400">待次日結算</span>
+                            )}
+                          </td>
+                          <td className="py-3 px-4 text-right font-mono">
+                            {item.return3D !== null
+                              ? fmtPercent((item.return3D || 0) * 100)
+                              : '-'}
+                          </td>
+                          <td className="py-3 px-4 text-center">
+                            {!hasReturn ? (
+                              <Badge variant="neutral" size="xs">
+                                ⏳ 驗證中
+                              </Badge>
+                            ) : isWin ? (
+                              <Badge variant="buy" size="xs">
+                                 獲利命中
+                              </Badge>
+                            ) : (
+                              <Badge variant="sell" size="xs">
+                                ❌ 停損/失準
+                              </Badge>
+                            )}
+                          </td>
+                          <td className="py-3 px-4 text-right">
+                            <Button
+                              variant="ghost"
+                              size="xs"
+                              onClick={() => onOpenChart(item)}
+                              icon={BarChart3}
+                              title="查看走勢圖"
+                            />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         ) : paged.length === 0 ? (
           <div className="py-16 text-center text-slate-400">
@@ -447,7 +800,7 @@ export default function ScheduledPage({ onOpenChart, onNavigate }) {
             </table>
           </div>
         ) : (
-          /* TAB 2, 3, 4: 未持股 Top 20 買進 / 賣出 / 全部訊號 */
+          /* TAB 2, 3, 5: 未持股 Top 20 買進 / 賣出 / 全部訊號 */
           <div className="overflow-x-auto -mx-6 -my-6">
             <table className="w-full text-left text-xs">
               <thead className="bg-slate-50 dark:bg-slate-900/60 border-b border-slate-200 dark:border-slate-800 text-slate-400 uppercase tracking-wider font-semibold">

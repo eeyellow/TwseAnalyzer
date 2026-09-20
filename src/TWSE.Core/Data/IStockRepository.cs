@@ -23,4 +23,12 @@ public interface IStockRepository
     Task InsertDailySignalsAsync(IEnumerable<DailySignal> signals, DateTime date);
     Task<List<DailySignal>> GetDailySignalsAsync(DateTime date);
     Task<DateTime?> GetLatestSignalDateAsync();
+
+    // Signal Tracking & Adaptive Verification
+    Task<Dictionary<string, List<OHLCV>>> GetMarketRecentPricesBatchAsync(int lookbackDays = 120);
+    Task BatchInsertSignalTrackingAsync(IEnumerable<SignalTrackingItem> items);
+    Task<List<SignalTrackingItem>> GetPendingSignalTrackingAsync();
+    Task BatchUpdateSignalTrackingAsync(IEnumerable<SignalTrackingItem> items);
+    Task<List<SignalTrackingItem>> GetRecentSignalTrackingAsync(int limit = 100);
+    Task<VerificationSummary> GetVerificationSummaryAsync(int daysWindow = 60);
 }

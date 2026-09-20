@@ -86,3 +86,19 @@ export async function runAnalysisJob() {
   const res = await fetch(`${API_BASE}/jobs/run-analysis`, { method: 'POST' });
   return res.json();
 }
+
+// --- Adaptive Learning & Verification ---
+export async function getVerificationSummary(days = 60) {
+  const res = await fetch(`${API_BASE}/verification/summary?days=${days}`);
+  return res.json();
+}
+
+export async function getVerificationHistory(limit = 100) {
+  const res = await fetch(`${API_BASE}/verification/history?limit=${limit}`);
+  return res.json();
+}
+
+export async function runVerificationJob() {
+  const res = await fetch(`${API_BASE}/verification/run`, { method: 'POST' });
+  return res.json();
+}
