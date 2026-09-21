@@ -8,31 +8,18 @@ import {
   getSimulationSummary,
   cancelSimulation,
 } from '../../api';
-import { fmtCurrency, fmtPercent, fmtDate } from '../../utils/formatters';
-import Card from '../common/Card';
 import Button from '../common/Button';
-import Badge from '../common/Badge';
 import {
   Play,
   Square,
   RefreshCw,
   Calendar,
   TrendingUp,
-  TrendingDown,
   Layers,
   ShieldCheck,
-  ShieldAlert,
   Award,
-  Activity,
   Clock,
-  Sparkles,
-  Sliders,
   BarChart3,
-  HelpCircle,
-  Filter,
-  CheckCircle2,
-  XCircle,
-  AlertTriangle,
 } from 'lucide-react';
 
 export default function SimulationReplayPanel({ onOpenChart }) {
@@ -47,7 +34,6 @@ export default function SimulationReplayPanel({ onOpenChart }) {
   // Status & Progress State
   const [status, setStatus] = useState(null);
   const [summary, setSummary] = useState(null);
-  const [loadingInitial, setLoadingInitial] = useState(true);
   const [viewTab, setViewTab] = useState('quarterly'); // 'quarterly' | 'strategies' | 'stocks' | 'industries'
 
   const pollTimerRef = useRef(null);
@@ -65,8 +51,6 @@ export default function SimulationReplayPanel({ onOpenChart }) {
         }
       } catch (err) {
         console.warn('Failed to load initial simulation state', err);
-      } finally {
-        setLoadingInitial(false);
       }
     }
     init();

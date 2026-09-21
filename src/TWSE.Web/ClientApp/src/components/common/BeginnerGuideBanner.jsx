@@ -1,14 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
-  HelpCircle,
   ChevronDown,
   ChevronUp,
   Sparkles,
   ShieldCheck,
   Zap,
   Target,
-  BarChart2,
-  BookOpen,
 } from 'lucide-react';
 
 export default function BeginnerGuideBanner() {

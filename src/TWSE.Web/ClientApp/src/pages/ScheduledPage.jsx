@@ -39,6 +39,7 @@ import {
   Layers,
   ShieldCheck,
   ShieldAlert,
+  Calendar,
 } from 'lucide-react';
 
 export default function ScheduledPage({ onOpenChart, onNavigate }) {
