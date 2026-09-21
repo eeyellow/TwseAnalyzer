@@ -75,6 +75,9 @@ public class SqliteRepository : IStockRepository
                 return_5d REAL,
                 max_return_5d REAL,
                 max_drawdown_5d REAL,
+                volume_20d_avg REAL DEFAULT 0,
+                is_noise INTEGER NOT NULL DEFAULT 0,
+                noise_reason TEXT,
                 status TEXT NOT NULL DEFAULT 'Pending',
                 is_win INTEGER NOT NULL DEFAULT 0,
                 features_json TEXT,
@@ -102,6 +105,22 @@ public class SqliteRepository : IStockRepository
             await connection.ExecuteAsync("ALTER TABLE portfolio ADD COLUMN selected_strategy TEXT;");
         }
         catch { /* Column may already exist */ }
+
+        try
+        {
+            await connection.ExecuteAsync("ALTER TABLE signal_tracking ADD COLUMN volume_20d_avg REAL DEFAULT 0;");
+        }
+        catch { }
+        try
+        {
+            await connection.ExecuteAsync("ALTER TABLE signal_tracking ADD COLUMN is_noise INTEGER DEFAULT 0;");
+        }
+        catch { }
+        try
+        {
+            await connection.ExecuteAsync("ALTER TABLE signal_tracking ADD COLUMN noise_reason TEXT;");
+        }
+        catch { }
 
         // 自動同步舊有 data/portfolio.json (若存在且資料庫為空)
         try
@@ -360,12 +379,17 @@ public class SqliteRepository : IStockRepository
         var sql = @"
             INSERT INTO signal_tracking (
                 signal_date, code, signal_type, strategy_name, entry_price, 
+                volume_20d_avg, is_noise, noise_reason,
                 status, is_win, features_json, created_at
             ) VALUES (
                 @SignalDate, @StockCode, @SignalType, @StrategyName, @EntryPrice, 
+                @Volume20dAvg, @IsNoise, @NoiseReason,
                 @Status, @IsWin, @FeaturesJson, @CreatedAtStr
             ) ON CONFLICT(signal_date, code, strategy_name) DO UPDATE SET
                 entry_price = excluded.entry_price,
+                volume_20d_avg = excluded.volume_20d_avg,
+                is_noise = excluded.is_noise,
+                noise_reason = excluded.noise_reason,
                 features_json = excluded.features_json;";
 
         var paramsList = items.Select(i => new
@@ -375,6 +399,9 @@ public class SqliteRepository : IStockRepository
             i.SignalType,
             i.StrategyName,
             i.EntryPrice,
+            i.Volume20dAvg,
+            i.IsNoise,
+            i.NoiseReason,
             i.Status,
             i.IsWin,
             i.FeaturesJson,
@@ -393,6 +420,7 @@ public class SqliteRepository : IStockRepository
                    strategy_name as StrategyName, entry_price as EntryPrice, next_open as NextOpen,
                    next_close as NextClose, return_1d as Return1D, return_3d as Return3D,
                    return_5d as Return5D, max_return_5d as MaxReturn5D, max_drawdown_5d as MaxDrawdown5D,
+                   volume_20d_avg as Volume20dAvg, is_noise as IsNoise, noise_reason as NoiseReason,
                    status as Status, is_win as IsWin, features_json as FeaturesJson
             FROM signal_tracking 
             WHERE status = 'Pending' OR return_5d IS NULL
@@ -416,6 +444,9 @@ public class SqliteRepository : IStockRepository
                 return_5d = @Return5D,
                 max_return_5d = @MaxReturn5D,
                 max_drawdown_5d = @MaxDrawdown5D,
+                volume_20d_avg = @Volume20dAvg,
+                is_noise = @IsNoise,
+                noise_reason = @NoiseReason,
                 status = @Status,
                 is_win = @IsWin,
                 verified_at = @VerifiedAtStr
@@ -431,6 +462,9 @@ public class SqliteRepository : IStockRepository
             i.Return5D,
             i.MaxReturn5D,
             i.MaxDrawdown5D,
+            i.Volume20dAvg,
+            i.IsNoise,
+            i.NoiseReason,
             i.Status,
             i.IsWin,
             VerifiedAtStr = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss")
@@ -448,6 +482,7 @@ public class SqliteRepository : IStockRepository
                    strategy_name as StrategyName, entry_price as EntryPrice, next_open as NextOpen,
                    next_close as NextClose, return_1d as Return1D, return_3d as Return3D,
                    return_5d as Return5D, max_return_5d as MaxReturn5D, max_drawdown_5d as MaxDrawdown5D,
+                   volume_20d_avg as Volume20dAvg, is_noise as IsNoise, noise_reason as NoiseReason,
                    status as Status, is_win as IsWin, features_json as FeaturesJson
             FROM signal_tracking
             ORDER BY signal_date DESC, id DESC
@@ -466,67 +501,85 @@ public class SqliteRepository : IStockRepository
                    strategy_name as StrategyName, entry_price as EntryPrice, next_open as NextOpen,
                    next_close as NextClose, return_1d as Return1D, return_3d as Return3D,
                    return_5d as Return5D, max_return_5d as MaxReturn5D, max_drawdown_5d as MaxDrawdown5D,
+                   volume_20d_avg as Volume20dAvg, is_noise as IsNoise, noise_reason as NoiseReason,
                    status as Status, is_win as IsWin, features_json as FeaturesJson
             FROM signal_tracking
             WHERE signal_date >= @MinDate";
 
         var allItems = (await connection.QueryAsync<SignalTrackingItem>(sql, new { MinDate = minDate })).ToList();
-        var verifiedItems = allItems.Where(i => i.Return1D.HasValue).ToList();
+        var allStocks = (await GetAllStocksAsync()).ToDictionary(s => s.Code, StringComparer.OrdinalIgnoreCase);
+
+        var rawVerified = allItems.Where(i => i.Return1D.HasValue).ToList();
+        var cleanVerified = rawVerified.Where(i => i.IsNoise == 0).ToList();
 
         var summary = new VerificationSummary
         {
             TotalTrackedSignals = allItems.Count,
-            TotalVerifiedSignals = verifiedItems.Count,
+            TotalVerifiedSignals = cleanVerified.Count,
+            FilteredNoiseSignals = allItems.Count(i => i.IsNoise == 1),
             LastCalculatedAt = DateTime.Now
         };
 
-        if (verifiedItems.Any())
+        if (rawVerified.Any())
         {
-            summary.OverallWinRate1D = Math.Round((decimal)verifiedItems.Count(i => i.IsWin == 1) / verifiedItems.Count, 4);
-            summary.OverallAvgReturn1D = Math.Round(verifiedItems.Average(i => i.Return1D ?? 0), 4);
+            summary.RawWinRate1D = Math.Round((decimal)rawVerified.Count(i => i.IsWin == 1) / rawVerified.Count, 4);
+        }
 
-            var with3D = verifiedItems.Where(i => i.Return3D.HasValue).ToList();
+        if (cleanVerified.Any())
+        {
+            summary.OverallWinRate1D = Math.Round((decimal)cleanVerified.Count(i => i.IsWin == 1) / cleanVerified.Count, 4);
+            summary.OverallAvgReturn1D = Math.Round(cleanVerified.Average(i => i.Return1D ?? 0), 4);
+
+            var with3D = cleanVerified.Where(i => i.Return3D.HasValue).ToList();
             if (with3D.Any())
             {
                 summary.OverallWinRate3D = Math.Round((decimal)with3D.Count(i => (i.Return3D ?? 0) > 0) / with3D.Count, 4);
                 summary.OverallAvgReturn3D = Math.Round(with3D.Average(i => i.Return3D ?? 0), 4);
             }
         }
+        else
+        {
+            summary.OverallWinRate1D = summary.RawWinRate1D;
+        }
 
-        // 依策略分組統計與計算動態自適應權重
+        // 1. 依策略分組統計與計算動態自適應權重 (以純化樣本為主，保護優質策略不被殭屍股拖垮)
         var groupedByStrat = allItems.GroupBy(i => i.StrategyName);
         foreach (var grp in groupedByStrat)
         {
-            var stratVerified = grp.Where(i => i.Return1D.HasValue).ToList();
             var total = grp.Count();
-            var verifiedCount = stratVerified.Count;
-            int wins = stratVerified.Count(i => i.IsWin == 1);
-            decimal winRate = verifiedCount > 0 ? Math.Round((decimal)wins / verifiedCount, 4) : 0m;
-            decimal avgRet1D = verifiedCount > 0 ? Math.Round(stratVerified.Average(i => i.Return1D ?? 0), 4) : 0m;
+            var stratRaw = grp.Where(i => i.Return1D.HasValue).ToList();
+            var stratClean = stratRaw.Where(i => i.IsNoise == 0).ToList();
+            var noiseCount = stratRaw.Count(i => i.IsNoise == 1);
 
-            var with3D = stratVerified.Where(i => i.Return3D.HasValue).ToList();
+            decimal rawWinRate = stratRaw.Count > 0 ? Math.Round((decimal)stratRaw.Count(i => i.IsWin == 1) / stratRaw.Count, 4) : 0m;
+            
+            var effectiveSet = stratClean.Count >= 3 ? stratClean : stratRaw;
+            int verifiedCount = effectiveSet.Count;
+            int wins = effectiveSet.Count(i => i.IsWin == 1);
+            decimal cleanWinRate = verifiedCount > 0 ? Math.Round((decimal)wins / verifiedCount, 4) : 0m;
+            decimal avgRet1D = verifiedCount > 0 ? Math.Round(effectiveSet.Average(i => i.Return1D ?? 0), 4) : 0m;
+
+            var with3D = effectiveSet.Where(i => i.Return3D.HasValue).ToList();
             decimal avgRet3D = with3D.Any() ? Math.Round(with3D.Average(i => i.Return3D ?? 0), 4) : 0m;
 
-            // 計算盈虧比 (Profit Factor = 總獲利 / 總虧損)
-            decimal totalGains = stratVerified.Where(i => (i.Return1D ?? 0) > 0).Sum(i => i.Return1D ?? 0);
-            decimal totalLosses = Math.Abs(stratVerified.Where(i => (i.Return1D ?? 0) < 0).Sum(i => i.Return1D ?? 0));
+            decimal totalGains = effectiveSet.Where(i => (i.Return1D ?? 0) > 0).Sum(i => i.Return1D ?? 0);
+            decimal totalLosses = Math.Abs(effectiveSet.Where(i => (i.Return1D ?? 0) < 0).Sum(i => i.Return1D ?? 0));
             decimal profitFactor = totalLosses > 0 ? Math.Round(totalGains / totalLosses, 2) : (totalGains > 0 ? 3.0m : 1.0m);
 
-            // 動態權重演算法：基準 1.0，根據近期勝率與期望值動態伸縮 (0.2 ~ 2.5)
             decimal weight = 1.0m;
             string status = "Active";
 
-            if (verifiedCount >= 5) // 至少有 5 筆驗證數據才開始動態調節
+            if (verifiedCount >= 5)
             {
-                if (winRate >= 0.60m && profitFactor >= 1.3m)
+                if (cleanWinRate >= 0.60m && profitFactor >= 1.3m)
                 {
-                    weight = Math.Min(2.5m, 1.0m + (winRate - 0.5m) * 2.5m);
-                    status = "ScaledUp"; // 勝率優秀，自動加權擴大推薦
+                    weight = Math.Min(2.5m, 1.0m + (cleanWinRate - 0.5m) * 2.5m);
+                    status = "ScaledUp";
                 }
-                else if (winRate < 0.40m || profitFactor < 0.8m)
+                else if (cleanWinRate < 0.40m || profitFactor < 0.8m)
                 {
-                    weight = Math.Max(0.2m, 1.0m - (0.5m - winRate) * 2.0m);
-                    status = winRate < 0.30m ? "Hibernating" : "Demoted"; // 近期失靈，自動降權或休眠
+                    weight = Math.Max(0.2m, 1.0m - (0.5m - cleanWinRate) * 2.0m);
+                    status = cleanWinRate < 0.30m ? "Hibernating" : "Demoted";
                 }
             }
 
@@ -534,9 +587,12 @@ public class SqliteRepository : IStockRepository
             {
                 StrategyName = grp.Key,
                 TotalSignals = total,
-                VerifiedSignals = verifiedCount,
+                VerifiedSignals = stratRaw.Count,
+                CleanSignals = stratClean.Count,
+                NoiseCount = noiseCount,
                 WinCount = wins,
-                WinRate = winRate,
+                WinRate = cleanWinRate,
+                RawWinRate = rawWinRate,
                 AvgReturn1D = avgRet1D,
                 AvgReturn3D = avgRet3D,
                 ProfitFactor = profitFactor,
@@ -544,6 +600,110 @@ public class SqliteRepository : IStockRepository
                 StatusRecommendation = status
             });
         }
+
+        // 2. 訓練與計算「個股 × 策略」適配組合 (Stock-Strategy Affinity Matrix)
+        var stockStratGroups = rawVerified.GroupBy(i => (i.StockCode, i.StrategyName));
+        foreach (var grp in stockStratGroups)
+        {
+            var code = grp.Key.StockCode;
+            var stratName = grp.Key.StrategyName;
+            var samples = grp.ToList();
+            int sampleCount = samples.Count;
+            int wins = samples.Count(i => i.IsWin == 1);
+            decimal winRate = Math.Round((decimal)wins / sampleCount, 4);
+            decimal avgRet = Math.Round(samples.Average(i => i.Return1D ?? 0), 4);
+
+            decimal gains = samples.Where(i => (i.Return1D ?? 0) > 0).Sum(i => i.Return1D ?? 0);
+            decimal losses = Math.Abs(samples.Where(i => (i.Return1D ?? 0) < 0).Sum(i => i.Return1D ?? 0));
+            decimal pf = losses > 0 ? Math.Round(gains / losses, 2) : (gains > 0 ? 3.0m : 1.0m);
+
+            decimal affinityScore = Math.Round(Math.Clamp((winRate * 60m) + (pf >= 1m ? (pf - 1m) * 15m : -10m) + Math.Min(25m, sampleCount * 5m), 0m, 100m), 1);
+
+            string fitLevel = "Evaluating";
+            if (sampleCount >= 2)
+            {
+                if (winRate >= 0.65m && pf >= 1.2m) fitLevel = "Optimal";
+                else if (winRate >= 0.50m) fitLevel = "Good";
+                else if (winRate < 0.35m || pf < 0.6m) fitLevel = "Mismatched";
+            }
+
+            bool isRecommended = fitLevel == "Optimal" || (fitLevel == "Good" && winRate >= 0.55m);
+
+            allStocks.TryGetValue(code, out var sInfo);
+
+            summary.TopStockAffinities.Add(new StockStrategyAffinity
+            {
+                StockCode = code,
+                StockName = sInfo?.Name ?? code,
+                Industry = sInfo?.Industry ?? "其他",
+                StrategyName = stratName,
+                SampleCount = sampleCount,
+                WinCount = wins,
+                WinRate = winRate,
+                AvgReturn1D = avgRet,
+                ProfitFactor = pf,
+                AffinityScore = affinityScore,
+                FitLevel = fitLevel,
+                IsRecommendedUniverse = isRecommended
+            });
+        }
+
+        summary.TopStockAffinities = summary.TopStockAffinities
+            .OrderByDescending(a => a.AffinityScore)
+            .ThenByDescending(a => a.SampleCount)
+            .Take(150)
+            .ToList();
+
+        // 3. 統計各策略專屬有效股票池數量 (DedicatedUniverseCount)
+        foreach (var m in summary.StrategyMetrics)
+        {
+            m.DedicatedUniverseCount = summary.TopStockAffinities
+                .Count(a => a.StrategyName.Equals(m.StrategyName, StringComparison.OrdinalIgnoreCase) && a.IsRecommendedUniverse);
+        }
+
+        // 4. 統計「產業族群 × 策略」適配組合 (Industry-Strategy Affinity Matrix)
+        var industryGroups = rawVerified
+            .Where(i => allStocks.ContainsKey(i.StockCode))
+            .GroupBy(i => (Industry: allStocks[i.StockCode].Industry, i.StrategyName))
+            .Where(g => !string.IsNullOrEmpty(g.Key.Industry));
+
+        foreach (var grp in industryGroups)
+        {
+            var samples = grp.ToList();
+            int sampleCount = samples.Count;
+            int wins = samples.Count(i => i.IsWin == 1);
+            decimal winRate = Math.Round((decimal)wins / sampleCount, 4);
+            decimal avgRet = Math.Round(samples.Average(i => i.Return1D ?? 0), 4);
+
+            decimal gains = samples.Where(i => (i.Return1D ?? 0) > 0).Sum(i => i.Return1D ?? 0);
+            decimal losses = Math.Abs(samples.Where(i => (i.Return1D ?? 0) < 0).Sum(i => i.Return1D ?? 0));
+            decimal pf = losses > 0 ? Math.Round(gains / losses, 2) : (gains > 0 ? 3.0m : 1.0m);
+
+            string fitRec = "Neutral";
+            if (sampleCount >= 3)
+            {
+                if (winRate >= 0.60m && pf >= 1.2m) fitRec = "HighlySuitable";
+                else if (winRate >= 0.50m) fitRec = "Suitable";
+                else if (winRate < 0.40m) fitRec = "Caution";
+            }
+
+            summary.IndustryAffinities.Add(new IndustryStrategyAffinity
+            {
+                Industry = grp.Key.Industry,
+                StrategyName = grp.Key.StrategyName,
+                SampleCount = sampleCount,
+                WinCount = wins,
+                WinRate = winRate,
+                AvgReturn1D = avgRet,
+                ProfitFactor = pf,
+                FitRecommendation = fitRec
+            });
+        }
+
+        summary.IndustryAffinities = summary.IndustryAffinities
+            .OrderByDescending(ia => ia.SampleCount)
+            .ThenByDescending(ia => ia.WinRate)
+            .ToList();
 
         return summary;
     }

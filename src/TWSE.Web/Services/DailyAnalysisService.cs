@@ -149,8 +149,16 @@ public class DailyAnalysisService
             }
 
             // ==========================================
-            // 步驟 5: 平行運算未持有個股，套用自適應權重推薦 Top 20 買進與賣出
+            // 步驟 5: 平行運算未持有個股，套用「個股/族群-策略適配組合矩陣」精選推薦
             // ==========================================
+            var allStocks = (await stockRepo.GetAllStocksAsync()).ToDictionary(s => s.Code, StringComparer.OrdinalIgnoreCase);
+            var affinityLookup = verificationSummary.TopStockAffinities
+                .GroupBy(a => $"{a.StockCode}_{a.StrategyName}", StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+            var industryLookup = verificationSummary.IndustryAffinities
+                .GroupBy(a => $"{a.Industry}_{a.StrategyName}", StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
             var unownedHistories = allHistories
                 .Where(kvp => !portfolioCodes.Contains(kvp.Key) && kvp.Value.Count >= 20)
                 .ToList();
@@ -167,7 +175,28 @@ public class DailyAnalysisService
                 var lastClose = history[lastIndex].Close;
                 var lastVol = history[lastIndex].Volume;
 
-                // 檢測買進條件
+                // 1. 流動性與噪聲判定 (20日均量 < 300張 視為低流動性冷門股/殭屍股，不推薦且隔離學習)
+                var vol20d = history.Count >= 20
+                    ? history.TakeLast(20).Average(p => p.Volume) / 1000m
+                    : lastVol / 1000m;
+
+                bool isNoise = false;
+                string? noiseReason = null;
+                if (vol20d < 300m)
+                {
+                    isNoise = true;
+                    noiseReason = $"低流動性 (20日均量 {Math.Round(vol20d, 0)} 張 < 300張)";
+                }
+                else if (history.Count >= 2 && history[lastIndex].Low == history[lastIndex].High && lastVol < 100000)
+                {
+                    isNoise = true;
+                    noiseReason = "極端跳空或流動性異常";
+                }
+
+                allStocks.TryGetValue(code, out var sInfo);
+                var industry = sInfo?.Industry ?? "";
+
+                // 2. 檢測買進條件
                 foreach (var (name, config) in loadedStrategies)
                 {
                     var entryConditions = (config.Entry != null && config.Entry.Any())
@@ -176,15 +205,30 @@ public class DailyAnalysisService
 
                     if (entryConditions.Any() && evaluator.EvaluateAll(entryConditions, history, lastIndex))
                     {
-                        // 取得自適應動態權重
                         strategyWeights.TryGetValue(name, out var adaptWeight);
                         if (adaptWeight <= 0) adaptWeight = 1.0m;
 
-                        // 綜合推薦分數 = 成交量 (流動性) * 策略實戰勝率權重
-                        double weightedScore = (double)lastVol * (double)adaptWeight;
-                        buyCandidates.Add((code, lastClose, lastVol, name, weightedScore));
+                        // 適配加成倍數：針對不同個股與產業族群動態調整，非一體適用
+                        double affinityMultiplier = 1.0;
+                        if (affinityLookup.TryGetValue($"{code}_{name}", out var aff))
+                        {
+                            if (aff.FitLevel == "Optimal") affinityMultiplier = 1.5; // 黃金適配組合
+                            else if (aff.FitLevel == "Good") affinityMultiplier = 1.2;
+                            else if (aff.FitLevel == "Mismatched") affinityMultiplier = 0.2; // 嚴重不適合此個股
+                        }
+                        else if (!string.IsNullOrEmpty(industry) && industryLookup.TryGetValue($"{industry}_{name}", out var indAff))
+                        {
+                            if (indAff.FitRecommendation == "HighlySuitable") affinityMultiplier = 1.25;
+                            else if (indAff.FitRecommendation == "Caution") affinityMultiplier = 0.5;
+                        }
 
-                        // 收集全市場追蹤清單
+                        // 只有非噪聲股且非嚴重互斥的個股才納入 Top 推薦池
+                        if (!isNoise && affinityMultiplier > 0.3)
+                        {
+                            double weightedScore = (double)lastVol * (double)adaptWeight * affinityMultiplier;
+                            buyCandidates.Add((code, lastClose, lastVol, name, weightedScore));
+                        }
+
                         allMarketSignals.Add(new SignalTrackingItem
                         {
                             SignalDate = targetDate.ToString("yyyy-MM-dd"),
@@ -192,13 +236,16 @@ public class DailyAnalysisService
                             SignalType = "Buy",
                             StrategyName = name,
                             EntryPrice = lastClose,
+                            Volume20dAvg = Math.Round(vol20d, 1),
+                            IsNoise = isNoise ? 1 : 0,
+                            NoiseReason = noiseReason,
                             Status = "Pending"
                         });
                         break;
                     }
                 }
 
-                // 檢測賣出 / 避開條件
+                // 3. 檢測賣出 / 避開條件
                 foreach (var (name, config) in loadedStrategies)
                 {
                     if (config.Exit != null && config.Exit.Any())
@@ -208,8 +255,23 @@ public class DailyAnalysisService
                             strategyWeights.TryGetValue(name, out var adaptWeight);
                             if (adaptWeight <= 0) adaptWeight = 1.0m;
 
-                            double weightedScore = (double)lastVol * (double)adaptWeight;
-                            sellCandidates.Add((code, lastClose, lastVol, name, weightedScore));
+                            double affinityMultiplier = 1.0;
+                            if (affinityLookup.TryGetValue($"{code}_{name}", out var aff))
+                            {
+                                if (aff.FitLevel == "Optimal") affinityMultiplier = 1.5;
+                                else if (aff.FitLevel == "Mismatched") affinityMultiplier = 0.2;
+                            }
+                            else if (!string.IsNullOrEmpty(industry) && industryLookup.TryGetValue($"{industry}_{name}", out var indAff))
+                            {
+                                if (indAff.FitRecommendation == "HighlySuitable") affinityMultiplier = 1.25;
+                                else if (indAff.FitRecommendation == "Caution") affinityMultiplier = 0.5;
+                            }
+
+                            if (!isNoise && affinityMultiplier > 0.3)
+                            {
+                                double weightedScore = (double)lastVol * (double)adaptWeight * affinityMultiplier;
+                                sellCandidates.Add((code, lastClose, lastVol, name, weightedScore));
+                            }
 
                             allMarketSignals.Add(new SignalTrackingItem
                             {
@@ -218,6 +280,9 @@ public class DailyAnalysisService
                                 SignalType = "Sell",
                                 StrategyName = name,
                                 EntryPrice = lastClose,
+                                Volume20dAvg = Math.Round(vol20d, 1),
+                                IsNoise = isNoise ? 1 : 0,
+                                NoiseReason = noiseReason,
                                 Status = "Pending"
                             });
                             break;
@@ -320,6 +385,25 @@ public class DailyAnalysisService
                 }
 
                 if (forwardPrices.Count <= 1) continue; // 尚無次日行情
+
+                // 自動補齊流動性與噪聲判定 (若先前未記錄)
+                if (sig.Volume20dAvg == 0 && allHistories.TryGetValue(sig.StockCode, out var fullHist))
+                {
+                    var sigIdxInFull = fullHist.FindIndex(p => p.Date.Date >= signalDate.Date);
+                    if (sigIdxInFull >= 0)
+                    {
+                        var pastWindow = fullHist.Take(sigIdxInFull + 1).TakeLast(20).ToList();
+                        if (pastWindow.Any())
+                        {
+                            sig.Volume20dAvg = Math.Round(pastWindow.Average(p => p.Volume) / 1000m, 1);
+                            if (sig.Volume20dAvg < 300m)
+                            {
+                                sig.IsNoise = 1;
+                                sig.NoiseReason = $"低流動性 (20日均量 {sig.Volume20dAvg} 張 < 300張)";
+                            }
+                        }
+                    }
+                }
 
                 // 第 0 根為信號日，第 1 根為 T+1 日
                 var day1 = forwardPrices[1];

@@ -32,6 +32,11 @@ import {
   CheckCircle2,
   XCircle,
   HelpCircle,
+  Target,
+  Sparkles,
+  Layers,
+  ShieldCheck,
+  ShieldAlert,
 } from 'lucide-react';
 
 export default function ScheduledPage({ onOpenChart, onNavigate }) {
@@ -49,6 +54,8 @@ export default function ScheduledPage({ onOpenChart, onNavigate }) {
   const [verificationSummary, setVerificationSummary] = useState(null);
   const [verificationHistory, setVerificationHistory] = useState([]);
   const [verifying, setVerifying] = useState(false);
+  const [affinityView, setAffinityView] = useState('stocks'); // 'stocks' | 'universes' | 'industries'
+  const [affinitySearch, setAffinitySearch] = useState('');
 
   // Loading actions
   const [updating, setUpdating] = useState(false);
@@ -380,7 +387,7 @@ export default function ScheduledPage({ onOpenChart, onNavigate }) {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800">
                 <div className="flex items-center justify-between text-xs text-slate-500 mb-1">
-                  <span>歷史訊號結算總數</span>
+                  <span>有效結算 / 總追蹤</span>
                   <Award className="w-4 h-4 text-sky-500" />
                 </div>
                 <div className="text-xl font-bold font-mono text-slate-900 dark:text-white">
@@ -388,13 +395,13 @@ export default function ScheduledPage({ onOpenChart, onNavigate }) {
                   {verificationSummary?.totalTrackedSignals || 0} 筆
                 </div>
                 <p className="text-[11px] text-slate-400 mt-1">
-                  最近 60 日全市場真實追蹤
+                  近 60 日真實市場每日逐筆結算
                 </p>
               </div>
 
               <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800">
                 <div className="flex items-center justify-between text-xs text-slate-500 mb-1">
-                  <span>T+1 隔日沖勝率</span>
+                  <span>純化實戰勝率 (T+1)</span>
                   <TrendingUp className="w-4 h-4 text-emerald-500" />
                 </div>
                 <div className="text-xl font-bold font-mono text-emerald-500">
@@ -403,10 +410,10 @@ export default function ScheduledPage({ onOpenChart, onNavigate }) {
                   )}
                 </div>
                 <p className="text-[11px] text-slate-400 mt-1">
-                  次日平均報酬率：
+                  含噪全市場勝率：
                   <span className="font-mono font-medium ml-1">
                     {fmtPercent(
-                      (verificationSummary?.overallAvgReturn1D || 0) * 100
+                      (verificationSummary?.rawWinRate1D || 0) * 100
                     )}
                   </span>
                 </p>
@@ -414,27 +421,20 @@ export default function ScheduledPage({ onOpenChart, onNavigate }) {
 
               <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800">
                 <div className="flex items-center justify-between text-xs text-slate-500 mb-1">
-                  <span>T+3 短波段勝率</span>
-                  <BrainCircuit className="w-4 h-4 text-purple-500" />
+                  <span>低量與噪聲股隔離保護</span>
+                  <ShieldCheck className="w-4 h-4 text-purple-500" />
                 </div>
                 <div className="text-xl font-bold font-mono text-purple-500">
-                  {fmtPercent(
-                    (verificationSummary?.overallWinRate3D || 0) * 100
-                  )}
+                  {verificationSummary?.filteredNoiseSignals || 0} 筆隔離
                 </div>
                 <p className="text-[11px] text-slate-400 mt-1">
-                  3日平均報酬率：
-                  <span className="font-mono font-medium ml-1">
-                    {fmtPercent(
-                      (verificationSummary?.overallAvgReturn3D || 0) * 100
-                    )}
-                  </span>
+                  排除 20日均量 &lt; 300張與流動性枯竭股
                 </p>
               </div>
 
               <div className="p-4 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 flex flex-col justify-between">
                 <div className="flex items-center justify-between text-xs text-slate-500">
-                  <span>閉環自適應優化</span>
+                  <span>閉環自適應權重</span>
                   <Sliders className="w-4 h-4 text-amber-500" />
                 </div>
                 <div className="mt-2">
@@ -455,9 +455,9 @@ export default function ScheduledPage({ onOpenChart, onNavigate }) {
             {/* Strategy Weights Table */}
             <div className="space-y-3">
               <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <span>各策略組合實戰表現與自適應權重</span>
+                <span>各策略實戰表現與自適應權重</span>
                 <span className="text-xs font-normal text-slate-400">
-                  （系統根據近期實戰勝率自動調升或調降策略在 Top 20 的排序權重）
+                  （以純化數據計算動態權重，保護優質策略不被冷門殭屍股拖垮）
                 </span>
               </h3>
 
@@ -466,15 +466,16 @@ export default function ScheduledPage({ onOpenChart, onNavigate }) {
                   <thead className="bg-slate-50 dark:bg-slate-900/80 border-b border-slate-200 dark:border-slate-800 text-slate-400 font-semibold">
                     <tr>
                       <th className="py-3 px-4">策略模型名稱</th>
-                      <th className="py-3 px-4 text-right">追蹤訊號</th>
-                      <th className="py-3 px-4 text-right">已結算筆數</th>
-                      <th className="py-3 px-4 text-right">T+1 實戰勝率</th>
-                      <th className="py-3 px-4 text-right">T+1 平均報酬</th>
+                      <th className="py-3 px-4 text-right">純化有效樣本</th>
+                      <th className="py-3 px-4 text-right">隔離噪聲筆數</th>
+                      <th className="py-3 px-4 text-right">純化實戰勝率</th>
+                      <th className="py-3 px-4 text-right">原始全市場勝率</th>
                       <th className="py-3 px-4 text-right">盈虧比</th>
+                      <th className="py-3 px-4 text-center">專屬股票池</th>
                       <th className="py-3 px-4 text-center">
-                        動態自適應權重乘數
+                        動態權重乘數
                       </th>
-                      <th className="py-3 px-4">模型調度狀態</th>
+                      <th className="py-3 px-4">調度狀態</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -490,11 +491,11 @@ export default function ScheduledPage({ onOpenChart, onNavigate }) {
                           <td className="py-3 px-4 font-semibold text-slate-800 dark:text-slate-200">
                             {sm.strategyName}
                           </td>
-                          <td className="py-3 px-4 text-right font-mono">
-                            {sm.totalSignals}
+                          <td className="py-3 px-4 text-right font-mono font-bold text-slate-900 dark:text-white">
+                            {sm.cleanSignals || sm.verifiedSignals}
                           </td>
-                          <td className="py-3 px-4 text-right font-mono">
-                            {sm.verifiedSignals}
+                          <td className="py-3 px-4 text-right font-mono text-purple-500">
+                            {sm.noiseCount || 0}
                           </td>
                           <td className="py-3 px-4 text-right font-mono font-bold">
                             <span
@@ -507,11 +508,16 @@ export default function ScheduledPage({ onOpenChart, onNavigate }) {
                               {fmtPercent(sm.winRate * 100)}
                             </span>
                           </td>
-                          <td className="py-3 px-4 text-right font-mono">
-                            {fmtPercent(sm.avgReturn1D * 100)}
+                          <td className="py-3 px-4 text-right font-mono text-slate-400">
+                            {fmtPercent((sm.rawWinRate || sm.winRate) * 100)}
                           </td>
                           <td className="py-3 px-4 text-right font-mono">
                             {sm.profitFactor.toFixed(2)}
+                          </td>
+                          <td className="py-3 px-4 text-center font-mono">
+                            <Badge variant="neutral" size="xs">
+                              {sm.dedicatedUniverseCount || 0} 檔
+                            </Badge>
                           </td>
                           <td className="py-3 px-4 text-center font-mono font-bold">
                             <span
@@ -554,6 +560,348 @@ export default function ScheduledPage({ onOpenChart, onNavigate }) {
                   </tbody>
                 </table>
               </div>
+            </div>
+
+            {/* Multi-Strategy Stock & Industry Affinity Matrix */}
+            <div className="p-5 rounded-2xl bg-gradient-to-br from-indigo-50/50 via-white to-purple-50/40 dark:from-slate-900/80 dark:via-slate-900/50 dark:to-purple-950/20 border border-indigo-100 dark:border-indigo-900/40 space-y-4">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <Target className="w-4 h-4 text-indigo-500" />
+                    <span>多策略 × 個股與族群最適投資組合矩陣</span>
+                    <Badge variant="buy" size="xs">
+                      個股專屬適配非萬用
+                    </Badge>
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                    打破「全市場單一策略」局限，針對不同股票與產業特性訓練最適組合，並過濾冷門噪聲股
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-1.5 p-1 rounded-xl bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/60 self-start md:self-auto">
+                  <button
+                    onClick={() => setAffinityView('stocks')}
+                    className={`px-3 py-1 text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5 ${
+                      affinityView === 'stocks'
+                        ? 'bg-white dark:bg-[#111827] text-indigo-600 dark:text-indigo-400 shadow-sm'
+                        : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    個股專屬最適策略 ({verificationSummary?.topStockAffinities?.length || 0})
+                  </button>
+
+                  <button
+                    onClick={() => setAffinityView('universes')}
+                    className={`px-3 py-1 text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5 ${
+                      affinityView === 'universes'
+                        ? 'bg-white dark:bg-[#111827] text-indigo-600 dark:text-indigo-400 shadow-sm'
+                        : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    <Layers className="w-3.5 h-3.5" />
+                    策略專屬高勝率股票池
+                  </button>
+
+                  <button
+                    onClick={() => setAffinityView('industries')}
+                    className={`px-3 py-1 text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5 ${
+                      affinityView === 'industries'
+                        ? 'bg-white dark:bg-[#111827] text-indigo-600 dark:text-indigo-400 shadow-sm'
+                        : 'text-slate-500 hover:text-slate-900 dark:hover:text-white'
+                    }`}
+                  >
+                    <BarChart3 className="w-3.5 h-3.5" />
+                    產業族群適配分佈 ({verificationSummary?.industryAffinities?.length || 0})
+                  </button>
+                </div>
+              </div>
+
+              {/* View 1: 個股專屬策略適配表 */}
+              {affinityView === 'stocks' && (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="relative w-full sm:w-64">
+                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <input
+                        type="text"
+                        value={affinitySearch}
+                        onChange={(e) => setAffinitySearch(e.target.value)}
+                        placeholder="搜尋代碼、名稱、產業或策略..."
+                        className="w-full pl-8 pr-3 py-1 text-xs rounded-xl bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 outline-none text-slate-900 dark:text-white placeholder-slate-400"
+                      />
+                    </div>
+                    <span className="text-[11px] text-slate-400">
+                      顯示歷史驗證適配評分 Top 標的
+                    </span>
+                  </div>
+
+                  <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60">
+                    <table className="w-full text-left text-xs">
+                      <thead className="bg-slate-50 dark:bg-slate-900/80 border-b border-slate-200 dark:border-slate-800 text-slate-400 font-semibold">
+                        <tr>
+                          <th className="py-2.5 px-4">股票標的</th>
+                          <th className="py-2.5 px-4">所屬產業</th>
+                          <th className="py-2.5 px-4">專屬適配策略</th>
+                          <th className="py-2.5 px-4 text-right">驗證樣本</th>
+                          <th className="py-2.5 px-4 text-right">實戰勝率</th>
+                          <th className="py-2.5 px-4 text-right">平均報酬</th>
+                          <th className="py-2.5 px-4 text-right">盈虧比</th>
+                          <th className="py-2.5 px-4 text-center">適配評級</th>
+                          <th className="py-2.5 px-4 text-center">專屬推薦池</th>
+                          <th className="py-2.5 px-4 text-right">線圖</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                        {(verificationSummary?.topStockAffinities || [])
+                          .filter((a) => {
+                            if (!affinitySearch) return true;
+                            const q = affinitySearch.toLowerCase();
+                            return (
+                              a.stockCode.toLowerCase().includes(q) ||
+                              a.stockName.toLowerCase().includes(q) ||
+                              a.industry.toLowerCase().includes(q) ||
+                              a.strategyName.toLowerCase().includes(q)
+                            );
+                          })
+                          .slice(0, 30)
+                          .map((a) => (
+                            <tr
+                              key={`${a.stockCode}_${a.strategyName}`}
+                              className="hover:bg-slate-50/60 dark:hover:bg-slate-800/30"
+                            >
+                              <td className="py-2.5 px-4">
+                                <span className="font-mono font-bold text-sky-600 dark:text-sky-400 mr-1.5">
+                                  {a.stockCode}
+                                </span>
+                                <span className="font-medium text-slate-800 dark:text-slate-200">
+                                  {a.stockName}
+                                </span>
+                              </td>
+                              <td className="py-2.5 px-4 text-slate-500">
+                                {a.industry || '-'}
+                              </td>
+                              <td className="py-2.5 px-4 font-semibold text-slate-800 dark:text-slate-200">
+                                {a.strategyName}
+                              </td>
+                              <td className="py-2.5 px-4 text-right font-mono">
+                                {a.sampleCount} 筆
+                              </td>
+                              <td className="py-2.5 px-4 text-right font-mono font-bold">
+                                <span
+                                  className={
+                                    a.winRate >= 0.5
+                                      ? 'text-emerald-500'
+                                      : 'text-rose-500'
+                                  }
+                                >
+                                  {fmtPercent(a.winRate * 100)}
+                                </span>
+                              </td>
+                              <td className="py-2.5 px-4 text-right font-mono">
+                                {fmtPercent(a.avgReturn1D * 100)}
+                              </td>
+                              <td className="py-2.5 px-4 text-right font-mono">
+                                {a.profitFactor.toFixed(2)}
+                              </td>
+                              <td className="py-2.5 px-4 text-center">
+                                {a.fitLevel === 'Optimal' && (
+                                  <Badge variant="buy" size="xs">
+                                    🚀 黃金適配
+                                  </Badge>
+                                )}
+                                {a.fitLevel === 'Good' && (
+                                  <Badge variant="neutral" size="xs">
+                                    ✨ 良好適配
+                                  </Badge>
+                                )}
+                                {a.fitLevel === 'Mismatched' && (
+                                  <Badge variant="sell" size="xs">
+                                    ⚠️ 嚴重不相容
+                                  </Badge>
+                                )}
+                                {a.fitLevel === 'Evaluating' && (
+                                  <Badge variant="neutral" size="xs">
+                                    ⏳ 樣本累積中
+                                  </Badge>
+                                )}
+                              </td>
+                              <td className="py-2.5 px-4 text-center">
+                                {a.isRecommendedUniverse ? (
+                                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
+                                    <CheckCircle2 className="w-3.5 h-3.5" />
+                                    納入加權
+                                  </span>
+                                ) : (
+                                  <span className="text-[11px] text-slate-400">
+                                    標準
+                                  </span>
+                                )}
+                              </td>
+                              <td className="py-2.5 px-4 text-right">
+                                <Button
+                                  variant="ghost"
+                                  size="xs"
+                                  icon={BarChart3}
+                                  onClick={() => onOpenChart(a.stockCode)}
+                                >
+                                  看線圖
+                                </Button>
+                              </td>
+                            </tr>
+                          ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* View 2: 策略專屬高勝率股票池 */}
+              {affinityView === 'universes' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {(verificationSummary?.strategyMetrics || []).map((sm) => {
+                    const pool = (
+                      verificationSummary?.topStockAffinities || []
+                    ).filter(
+                      (a) =>
+                        a.strategyName.toLowerCase() ===
+                          sm.strategyName.toLowerCase() &&
+                        a.isRecommendedUniverse
+                    );
+
+                    const avgWin =
+                      pool.length > 0
+                        ? pool.reduce((acc, x) => acc + x.winRate, 0) /
+                          pool.length
+                        : sm.winRate;
+
+                    return (
+                      <div
+                        key={sm.strategyName}
+                        className="p-4 rounded-xl bg-white dark:bg-slate-900/70 border border-slate-200 dark:border-slate-800 space-y-3"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <h4 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                              <Sparkles className="w-4 h-4 text-amber-500" />
+                              <span>{sm.strategyName}</span>
+                            </h4>
+                            <p className="text-[11px] text-slate-400 mt-0.5">
+                              專屬標的池：{pool.length} 檔，池內平均勝率{' '}
+                              <span className="font-bold text-emerald-500">
+                                {fmtPercent(avgWin * 100)}
+                              </span>
+                            </p>
+                          </div>
+                          <Badge variant="buy" size="xs">
+                            專屬池加成 x1.5
+                          </Badge>
+                        </div>
+
+                        {pool.length === 0 ? (
+                          <p className="text-xs text-slate-400 py-3 text-center">
+                            尚無足夠樣本建立專屬推薦池，目前採用全市場標準運行
+                          </p>
+                        ) : (
+                          <div className="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto pr-1">
+                            {pool.map((p) => (
+                              <button
+                                key={p.stockCode}
+                                onClick={() => onOpenChart(p.stockCode)}
+                                className="px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 text-xs text-slate-700 dark:text-slate-300 transition-all flex items-center gap-1 border border-slate-200/60 dark:border-slate-700/60"
+                              >
+                                <span className="font-mono font-bold text-indigo-600 dark:text-indigo-400">
+                                  {p.stockCode}
+                                </span>
+                                <span>{p.stockName}</span>
+                                <span className="text-[10px] text-emerald-500 font-mono font-semibold ml-0.5">
+                                  {fmtPercent(p.winRate * 100)}
+                                </span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {/* View 3: 產業族群適配分佈 */}
+              {affinityView === 'industries' && (
+                <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900/60">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 dark:bg-slate-900/80 border-b border-slate-200 dark:border-slate-800 text-slate-400 font-semibold">
+                      <tr>
+                        <th className="py-2.5 px-4">產業族群名稱</th>
+                        <th className="py-2.5 px-4">策略模型</th>
+                        <th className="py-2.5 px-4 text-right">累積驗證樣本</th>
+                        <th className="py-2.5 px-4 text-right">族群勝率</th>
+                        <th className="py-2.5 px-4 text-right">平均報酬</th>
+                        <th className="py-2.5 px-4 text-right">盈虧比</th>
+                        <th className="py-2.5 px-4 text-center">產業適配建議</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {(verificationSummary?.industryAffinities || []).map((ia) => (
+                        <tr
+                          key={`${ia.industry}_${ia.strategyName}`}
+                          className="hover:bg-slate-50/60 dark:hover:bg-slate-800/30"
+                        >
+                          <td className="py-2.5 px-4 font-semibold text-slate-800 dark:text-slate-200">
+                            {ia.industry}
+                          </td>
+                          <td className="py-2.5 px-4 text-slate-600 dark:text-slate-400">
+                            {ia.strategyName}
+                          </td>
+                          <td className="py-2.5 px-4 text-right font-mono">
+                            {ia.sampleCount} 筆
+                          </td>
+                          <td className="py-2.5 px-4 text-right font-mono font-bold">
+                            <span
+                              className={
+                                ia.winRate >= 0.5
+                                  ? 'text-emerald-500'
+                                  : 'text-rose-500'
+                              }
+                            >
+                              {fmtPercent(ia.winRate * 100)}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-4 text-right font-mono">
+                            {fmtPercent(ia.avgReturn1D * 100)}
+                          </td>
+                          <td className="py-2.5 px-4 text-right font-mono">
+                            {ia.profitFactor.toFixed(2)}
+                          </td>
+                          <td className="py-2.5 px-4 text-center">
+                            {ia.fitRecommendation === 'HighlySuitable' && (
+                              <Badge variant="buy" size="xs">
+                                🚀 高度適合 (優先加權)
+                              </Badge>
+                            )}
+                            {ia.fitRecommendation === 'Suitable' && (
+                              <Badge variant="neutral" size="xs">
+                                ✨ 適合 (標準運行)
+                              </Badge>
+                            )}
+                            {ia.fitRecommendation === 'Caution' && (
+                              <Badge variant="sell" size="xs">
+                                ⚠️ 警惕 (易假突破/回撤大)
+                              </Badge>
+                            )}
+                            {ia.fitRecommendation === 'Neutral' && (
+                              <Badge variant="neutral" size="xs">
+                                觀察中
+                              </Badge>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
 
             {/* Historical Verification Track Log */}
