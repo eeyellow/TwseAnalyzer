@@ -280,20 +280,47 @@ AdaptiveWeight = Clamp(1.0 + 勝率權重加成 + 盈虧比加成, 0.2, 2.5)
 | :--- | :--- | :--- |
 | `GET` | `/api/stocks` | 取得全市場股票清單與追蹤狀態 |
 | `GET` | `/api/stocks/{code}/prices` | 取得指定個股近期的 K 線歷史資料 |
-| `GET` | `/api/stocks/portfolio` | 取得使用者持股投資組合 |
-| `POST` | `/api/stocks/portfolio` | 更新或新增持股資訊 |
-| `GET` | `/api/daily-analysis` | 取得最新的盤前分析與推薦結果 |
-| `POST` | `/api/daily-analysis/trigger` | 手動立即觸發每日分析管線 |
-| `GET` | `/api/verification/summary?days=60` | 取得近期 60 天迴歸驗證總體 KPI 與各策略自適應權重 |
+| `GET` | `/api/portfolio` | 取得使用者持股投資組合 |
+| `POST` | `/api/portfolio` | 更新或新增持股資訊 |
+| `GET` | `/api/dailyreport` | 取得最新的盤前分析與推薦結果 |
+| `POST` | `/api/jobs/run-analysis?date=yyyy-MM-dd` | 手動立即觸發每日分析（可選傳入歷史指定單日） |
+| `GET` | `/api/verification/summary?days=60` | 取得近期 60 天迴歸驗證總體 KPI、純化勝率與最適矩陣 |
 | `GET` | `/api/verification/history?limit=100` | 取得歷史訊號逐筆真實走勢結算明細清單 |
-| `POST` | `/api/verification/run` | 手動立即執行訊號結算比對與權重重算 |
+| `POST` | `/api/verification/run?date=yyyy-MM-dd` | 手動立即執行訊號結算比對與權重重算（可選傳入歷史指定單日） |
+| `POST` | `/api/simulation/start` | 啟動歷史滾動回放模擬背景任務（可自訂 `startDate`, `endDate`, `min20dVolume`） |
+| `GET` | `/api/simulation/status` | 輪詢歷史回放即時進度百分比、目前處理交易日與已結算訊號 |
+| `GET` | `/api/simulation/summary` | 取得歷史回放總體摘要（含歷年逐季勝率走勢、策略戰報與天菜個股池） |
+| `POST` | `/api/simulation/cancel` | 手動終止進行中的歷史回放模擬任務 |
 
 ---
 
-## 7. 機器學習 (ML) 特徵擴充介面
+## 7. 歷史滾動回放引擎（Walk-Forward Historical Replay）
+
+為徹底檢驗策略在跨越多年牛熊循環時的真實實戰能力，系統提供專屬的「歷史時間序列滾動前向回放器」：
+- **零未來偏差（Zero Look-ahead Bias）**：回放至歷史第 $T$ 日時，技術指標與選股條件僅切片取用 $0 \dots T$ 的歷史序列。
+- **逐日前向結算（Forward Verification）**：產生訊號後，利用 $T+1 \dots T+5$ 的真實行情進行盈虧與勝負結算。
+- **高效記憶體滑動視窗**：一次性將歷史日線批次快取至記憶體，透過 C# `Parallel.ForEach` 多核心運算，**全台股 2,000 檔標的 × 6 年（2020~2026）歷史逐日回放僅需 3~5 秒即可完成**。
+- **歷年逐季勝率走勢圖**：前端以 ECharts 繪製雙軸走勢，可對比「純化實戰勝率」vs「含噪原始勝率」及「平均 5 日波段報酬率」，清晰看見 2020 疫情崩盤、2021 航運狂潮、2022 空頭升息大修正、2023~2026 AI 大行情的真實勝率演進！
+
+---
+
+## 8. 新手友善介面設計（Beginner Friendly UI/UX）
+
+針對股市新手，介面導入多項直覺化設計：
+1. **新手快速導引卡（Beginner Guide Banner）**：以淺白易懂的圖文，白話解讀「每日盤前精選」、「為什麼要隔離冷門噪聲」與「如何替股票配對專屬天菜策略」。
+2. **快速回測期間預設鍵**：提供「🚀 2020 至今（推薦）」、「📈 近 3 年 AI 多頭」、「🌧️ 2022 空頭考驗」等一鍵帶入，不需手動慢慢挑日期。
+3. **直觀評級標籤**：
+   - `⭐ 黃金天菜` / `Optimal`：歷史勝率 $\ge 65\%$ 的專屬高勝率標的。
+   - `⚠️ 偏弱/逆風` / `Mismatched`：不適合該策略操作的標的。
+   - `🚫 冷門噪聲` / `Noise`：成交量不足 300 張已被隔離保護的假突破標的。
+
+---
+
+## 9. 機器學習 (ML) 特徵擴充介面
 
 `signal_tracking` 資料表內建 `features_json` 欄位。每次產生訊號時，系統可即時保留當日的特徵向量快照：
 - 技術指標向量：`SMA(5/10/20/60)`、`RSI(14)`、`MACD(12,26,9)`、`KD(9,3)`、`ATR`、乖離率（Bias）。
 - 量能與籌碼指標：成交量增幅比率、外資連買天數、投信持股比例。
 - **未來拓展**：可直接將歷史資料匯出為 CSV 或 Parquet，使用 Python（LightGBM / XGBoost / CatBoost）或 .NET ML.NET 進行二元分類或排序模型訓練，將機器學習預測機率直接注入作為選股的第二層評分濾網。
+
 

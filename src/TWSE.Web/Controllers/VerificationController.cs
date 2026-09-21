@@ -55,16 +55,24 @@ public class VerificationController : ControllerBase
     }
 
     [HttpPost("run")]
-    public async Task<IActionResult> RunVerification()
+    public async Task<IActionResult> RunVerification([FromQuery] string? date = null)
     {
-        var targetDate = DateTime.Now.Date;
-        if (DateTime.Now.Hour < 20)
+        DateTime targetDate;
+        if (!string.IsNullOrEmpty(date) && DateTime.TryParse(date, out var parsedDate))
         {
-            targetDate = targetDate.AddDays(-1);
+            targetDate = parsedDate.Date;
         }
-        while (targetDate.DayOfWeek == DayOfWeek.Saturday || targetDate.DayOfWeek == DayOfWeek.Sunday)
+        else
         {
-            targetDate = targetDate.AddDays(-1);
+            targetDate = DateTime.Now.Date;
+            if (DateTime.Now.Hour < 20)
+            {
+                targetDate = targetDate.AddDays(-1);
+            }
+            while (targetDate.DayOfWeek == DayOfWeek.Saturday || targetDate.DayOfWeek == DayOfWeek.Sunday)
+            {
+                targetDate = targetDate.AddDays(-1);
+            }
         }
 
         await _analysisService.RunAnalysisAsync(targetDate);
@@ -72,7 +80,8 @@ public class VerificationController : ControllerBase
 
         return Ok(new
         {
-            message = "迴歸驗證與策略自適應權重計算完成！",
+            message = $"已完成 {targetDate:yyyy-MM-dd} 迴歸驗證與策略自適應權重計算！",
+            targetDate = targetDate.ToString("yyyy-MM-dd"),
             summary = summary
         });
     }

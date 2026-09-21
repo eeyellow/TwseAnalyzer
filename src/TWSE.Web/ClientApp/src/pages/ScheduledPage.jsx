@@ -14,6 +14,8 @@ import { useToast } from '../context/ToastContext';
 import Card from '../components/common/Card';
 import Button from '../components/common/Button';
 import Badge from '../components/common/Badge';
+import BeginnerGuideBanner from '../components/common/BeginnerGuideBanner';
+import SimulationReplayPanel from '../components/simulation/SimulationReplayPanel';
 import {
   RefreshCw,
   Zap,
@@ -56,12 +58,13 @@ export default function ScheduledPage({ onOpenChart, onNavigate }) {
   const [verifying, setVerifying] = useState(false);
   const [affinityView, setAffinityView] = useState('stocks'); // 'stocks' | 'universes' | 'industries'
   const [affinitySearch, setAffinitySearch] = useState('');
+  const [customRunDate, setCustomRunDate] = useState('');
 
   // Loading actions
   const [updating, setUpdating] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
 
-  // Active Tab: 'holdings' | 'buys' | 'sells' | 'verification' | 'all'
+  // Active Tab: 'holdings' | 'buys' | 'sells' | 'verification' | 'simulation' | 'all'
   const [activeTab, setActiveTab] = useState('holdings');
 
   // Filters & Pagination
@@ -115,11 +118,12 @@ export default function ScheduledPage({ onOpenChart, onNavigate }) {
     }
   };
 
-  const handleRunAnalysis = async () => {
+  const handleRunAnalysis = async (targetDate = null) => {
+    const dateToRun = targetDate || customRunDate || null;
     setAnalyzing(true);
-    toast.info('開始執行全市場分析、歷史迴歸驗證與動態權重自適應...');
+    toast.info(dateToRun ? `開始執行 ${dateToRun} 指定日期分析與自適應驗證...` : '開始執行全市場分析、歷史迴歸驗證與動態權重自適應...');
     try {
-      const res = await runAnalysisJob();
+      const res = await runAnalysisJob(dateToRun);
       toast.success(res.message || '分析與自適應驗證完成！');
       await fetchReport();
     } catch (e) {
@@ -129,11 +133,12 @@ export default function ScheduledPage({ onOpenChart, onNavigate }) {
     }
   };
 
-  const handleRunVerification = async () => {
+  const handleRunVerification = async (targetDate = null) => {
+    const dateToRun = targetDate || customRunDate || null;
     setVerifying(true);
-    toast.info('重新結算所有歷史訊號實戰勝率與模型權重...');
+    toast.info(dateToRun ? `重新結算 ${dateToRun} 歷史訊號勝率與模型權重...` : '重新結算所有歷史訊號實戰勝率與模型權重...');
     try {
-      const res = await runVerificationJob();
+      const res = await runVerificationJob(dateToRun);
       toast.success(res.message || '迴歸驗證與模型權重更新完成！');
       if (res.summary) setVerificationSummary(res.summary);
       const vHistory = await getVerificationHistory(100);
@@ -238,7 +243,30 @@ export default function ScheduledPage({ onOpenChart, onNavigate }) {
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* 指定日期運算 (可選) */}
+          <div className="flex items-center gap-1 px-2.5 py-1 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0d121f] text-xs shadow-2xs">
+            <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+            <span className="text-slate-400 text-[11px] hidden sm:inline">指定日期:</span>
+            <input
+              type="date"
+              value={customRunDate}
+              onChange={(e) => setCustomRunDate(e.target.value)}
+              className="bg-transparent text-xs text-slate-700 dark:text-slate-300 focus:outline-none"
+              title="留空則預設分析當前最新交易日"
+            />
+            {customRunDate && (
+              <button
+                type="button"
+                onClick={() => setCustomRunDate('')}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 ml-1 text-xs"
+                title="清除指定日期"
+              >
+                ✕
+              </button>
+            )}
+          </div>
+
           <Button
             variant="outline"
             size="sm"
@@ -252,15 +280,18 @@ export default function ScheduledPage({ onOpenChart, onNavigate }) {
           <Button
             variant="primary"
             size="sm"
-            onClick={handleRunAnalysis}
+            onClick={() => handleRunAnalysis(customRunDate || null)}
             loading={analyzing}
             disabled={updating || analyzing || verifying}
             icon={Zap}
           >
-            立即手動運算
+            {customRunDate ? `分析指定日期 (${customRunDate})` : '立即手動運算'}
           </Button>
         </div>
       </div>
+
+      {/* 新手快速指引橫幅 */}
+      <BeginnerGuideBanner />
 
       {/* Navigation Tabs */}
       <Card>
@@ -324,6 +355,21 @@ export default function ScheduledPage({ onOpenChart, onNavigate }) {
             >
               <BrainCircuit className="w-3.5 h-3.5 text-purple-500" />
               迴歸驗證與自適應學習 ({verificationHistory.length})
+            </button>
+
+            <button
+              onClick={() => {
+                setActiveTab('simulation');
+                setPage(1);
+              }}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-all flex items-center gap-1.5 ${
+                activeTab === 'simulation'
+                  ? 'bg-white dark:bg-[#111827] text-indigo-600 dark:text-indigo-400 shadow-sm'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <Clock className="w-3.5 h-3.5 text-indigo-500" />
+              歷史滾動回放 (2020~2026)
             </button>
 
             <button
@@ -1022,6 +1068,9 @@ export default function ScheduledPage({ onOpenChart, onNavigate }) {
               </div>
             </div>
           </div>
+        ) : activeTab === 'simulation' ? (
+          /* TAB: 歷史滾動回放引擎 (Walk-Forward Replay 2020~2026) */
+          <SimulationReplayPanel onOpenChart={onOpenChart} />
         ) : paged.length === 0 ? (
           <div className="py-16 text-center text-slate-400">
             <AlertCircle className="w-10 h-10 mx-auto mb-2 text-slate-500 opacity-60" />

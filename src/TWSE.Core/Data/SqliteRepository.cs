@@ -370,6 +370,38 @@ public class SqliteRepository : IStockRepository
         return dict;
     }
 
+    public async Task<Dictionary<string, List<OHLCV>>> GetHistoricalPricesRangeBatchAsync(DateTime startDate, DateTime endDate)
+    {
+        using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync();
+        var minDate = startDate.ToString("yyyy-MM-dd");
+        var maxDate = endDate.ToString("yyyy-MM-dd");
+        var sql = "SELECT code as StockCode, date as DateText, open, high, low, close, volume FROM daily_prices WHERE date >= @MinDate AND date <= @MaxDate ORDER BY code, date ASC";
+        var dtoList = await connection.QueryAsync<dynamic>(sql, new { MinDate = minDate, MaxDate = maxDate });
+
+        var dict = new Dictionary<string, List<OHLCV>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var d in dtoList)
+        {
+            string code = d.StockCode;
+            if (!dict.TryGetValue(code, out var list))
+            {
+                list = new List<OHLCV>();
+                dict[code] = list;
+            }
+            list.Add(new OHLCV
+            {
+                StockCode = code,
+                Date = DateTime.Parse(d.DateText),
+                Open = (decimal)d.open,
+                High = (decimal)d.high,
+                Low = (decimal)d.low,
+                Close = (decimal)d.close,
+                Volume = (decimal)d.volume
+            });
+        }
+        return dict;
+    }
+
     public async Task BatchInsertSignalTrackingAsync(IEnumerable<SignalTrackingItem> items)
     {
         using var connection = new SqliteConnection(_connectionString);

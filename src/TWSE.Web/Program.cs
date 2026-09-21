@@ -58,6 +58,7 @@ builder.Services.AddSingleton<IConditionEvaluator, JsonConditionEvaluator>();
 builder.Services.AddSingleton<IBacktestEngine, BacktestEngine>();
 builder.Services.AddSingleton<IScreener, StockScreener>();
 builder.Services.AddScoped<DailyAnalysisService>();
+builder.Services.AddSingleton<HistoricalReplayService>();
 builder.Services.AddHostedService<DailyUpdateService>();
 
 builder.Services.AddControllers();
