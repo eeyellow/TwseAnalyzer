@@ -40,8 +40,10 @@ export async function fetchStrategies() {
   return res.json();
 }
 
-export async function getDailyReport() {
-  const res = await fetch(`${API_BASE}/dailyreport`);
+export async function getDailyReport(date = null) {
+  let url = `${API_BASE}/dailyreport`;
+  if (date) url += `?date=${encodeURIComponent(date)}`;
+  const res = await fetch(url);
   return res.json();
 }
 
@@ -82,7 +84,54 @@ export async function runUpdateJob() {
   return res.json();
 }
 
-export async function runAnalysisJob() {
-  const res = await fetch(`${API_BASE}/jobs/run-analysis`, { method: 'POST' });
+export async function runAnalysisJob(date = null) {
+  let url = `${API_BASE}/jobs/run-analysis`;
+  if (date) url += `?date=${encodeURIComponent(date)}`;
+  const res = await fetch(url, { method: 'POST' });
   return res.json();
 }
+
+// --- Adaptive Learning & Verification ---
+export async function getVerificationSummary(days = 60) {
+  const res = await fetch(`${API_BASE}/verification/summary?days=${days}`);
+  return res.json();
+}
+
+export async function getVerificationHistory(limit = 100) {
+  const res = await fetch(`${API_BASE}/verification/history?limit=${limit}`);
+  return res.json();
+}
+
+export async function runVerificationJob(date = null) {
+  let url = `${API_BASE}/verification/run`;
+  if (date) url += `?date=${encodeURIComponent(date)}`;
+  const res = await fetch(url, { method: 'POST' });
+  return res.json();
+}
+
+// --- Historical Walk-Forward Simulation Replay ---
+export async function startSimulation(payload) {
+  const res = await fetch(`${API_BASE}/simulation/start`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload || {}),
+  });
+  return res.json();
+}
+
+export async function getSimulationStatus() {
+  const res = await fetch(`${API_BASE}/simulation/status`);
+  return res.json();
+}
+
+export async function getSimulationSummary() {
+  const res = await fetch(`${API_BASE}/simulation/summary`);
+  if (!res.ok) throw new Error('尚未有完成的歷史回放報告');
+  return res.json();
+}
+
+export async function cancelSimulation() {
+  const res = await fetch(`${API_BASE}/simulation/cancel`, { method: 'POST' });
+  return res.json();
+}
+

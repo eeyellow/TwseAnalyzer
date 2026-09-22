@@ -99,36 +99,22 @@ public class JobsController : ControllerBase
     }
 
     [HttpPost("run-analysis")]
-    public async Task<IActionResult> RunAnalysis()
+    public async Task<IActionResult> RunAnalysis([FromQuery] string? date = null)
     {
         try
         {
-            var targetDate = GetTargetMarketDate();
-            _logger.LogInformation("Manual trigger: Starting daily analysis for {Date}", targetDate);
+            var targetDate = (!string.IsNullOrEmpty(date) && DateTime.TryParse(date, out var parsed))
+                ? parsed.Date
+                : MarketDateHelper.GetTargetMarketDate();
+
+            _logger.LogInformation("Manual trigger: Starting daily analysis for {Date:yyyy-MM-dd}", targetDate);
             await _analysisService.RunAnalysisAsync(targetDate);
-            return Ok(new { message = "系統分析完成" });
+            return Ok(new { message = $"指定日期 {targetDate:yyyy-MM-dd} 系統分析完成", targetDate = targetDate.ToString("yyyy-MM-dd") });
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to run analysis manually");
             return StatusCode(500, new { message = "分析失敗", error = ex.Message });
         }
-    }
-
-    private DateTime GetTargetMarketDate()
-    {
-        var now = DateTime.Now;
-        var target = now.Date;
-
-        if (now.Hour < 20)
-        {
-            target = target.AddDays(-1);
-        }
-
-        while (target.DayOfWeek == DayOfWeek.Saturday || target.DayOfWeek == DayOfWeek.Sunday)
-        {
-            target = target.AddDays(-1);
-        }
-        return target;
     }
 }

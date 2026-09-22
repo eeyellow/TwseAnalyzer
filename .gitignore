@@ -483,7 +483,7 @@ $RECYCLE.BIN/
 *.swp
 
 # Custom data and temp files
-data/
+/data/
 *.db
 *.sqlite
 *.sqlite3
@@ -499,4 +499,6 @@ test_yahoo.cs
 .openspec/
 
 !src/TWSE.Core/Data
+!tests/TWSE.Tests/Data
 src/TWSE.Web/wwwroot
+

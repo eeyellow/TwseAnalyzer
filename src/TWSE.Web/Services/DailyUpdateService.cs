@@ -51,48 +51,39 @@ public class DailyUpdateService : BackgroundService
         {
             using var scope = _serviceProvider.CreateScope();
             var stockRepo = scope.ServiceProvider.GetRequiredService<TWSE.Core.Data.IStockRepository>();
+            var analysisService = scope.ServiceProvider.GetRequiredService<DailyAnalysisService>();
             
-            // 2. 每次觸發時，先到資料庫檢查目前最新的資料時間 (用台積電 2330)
+            // 2. 使用精準台股營業日計算：平日 14:30 盤後收盤後即以「今天」為基準日
+            var targetDate = TWSE.Core.Data.MarketDateHelper.GetTargetMarketDate();
             var latestDate = await stockRepo.GetLatestPriceDateAsync("2330");
-            var targetDate = GetTargetMarketDate();
 
+            // 2.1 若股價數據落後於 targetDate，執行全市場日線增量更新
             if (latestDate == null || latestDate.Value.Date < targetDate)
             {
-                _logger.LogInformation("Latest data for 2330 is {LatestDate:yyyy-MM-dd}. Target date is {TargetDate:yyyy-MM-dd}. Running update...", latestDate, targetDate);
+                _logger.LogInformation("Database latest date ({LatestDate:yyyy-MM-dd}) behind target market date ({TargetDate:yyyy-MM-dd}). Starting daily data update...", latestDate, targetDate);
                 await RunUpdateAsync();
-                
-                // 3. 更新完畢後，執行盤前分析 (選股與庫存分析)
-                var analysisService = scope.ServiceProvider.GetRequiredService<DailyAnalysisService>();
+            }
+            else
+            {
+                _logger.LogInformation("Stock prices are up to date ({LatestDate:yyyy-MM-dd}).", latestDate);
+            }
+
+            // 2.2 檢查 targetDate 當日的分析推薦訊號是否已經產生
+            var existingSignals = await stockRepo.GetDailySignalsAsync(targetDate);
+            if (!existingSignals.Any())
+            {
+                _logger.LogInformation("Generating daily market analysis and recommendations for {TargetDate:yyyy-MM-dd}...", targetDate);
                 await analysisService.RunAnalysisAsync(targetDate);
             }
             else
             {
-                _logger.LogInformation("Data is up to date (Latest: {LatestDate:yyyy-MM-dd}). No update needed.", latestDate);
+                _logger.LogInformation("Daily analysis for {TargetDate:yyyy-MM-dd} already generated ({Count} signals).", targetDate, existingSignals.Count);
             }
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed during check and update tracking");
         }
-    }
-
-    private DateTime GetTargetMarketDate()
-    {
-        var now = DateTime.Now;
-        var target = now.Date;
-
-        // 如果目前還沒到晚上 8 點 (20:00)，那麼「最新應該要有的資料」是昨天的營業日
-        if (now.Hour < 20)
-        {
-             target = target.AddDays(-1);
-        }
-
-        // 迴避掉六日，找到最近的一個營業日
-        while (target.DayOfWeek == DayOfWeek.Saturday || target.DayOfWeek == DayOfWeek.Sunday)
-        {
-            target = target.AddDays(-1);
-        }
-        return target;
     }
 
     private async Task RunUpdateAsync()
