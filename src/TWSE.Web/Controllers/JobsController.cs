@@ -103,9 +103,20 @@ public class JobsController : ControllerBase
     {
         try
         {
-            var targetDate = (!string.IsNullOrEmpty(date) && DateTime.TryParse(date, out var parsed))
-                ? parsed.Date
-                : MarketDateHelper.GetTargetMarketDate();
+            DateTime targetDate;
+            if (!string.IsNullOrEmpty(date) && DateTime.TryParse(date, out var parsed))
+            {
+                targetDate = parsed.Date;
+            }
+            else
+            {
+                // 若無指定日期，優先取具有指標性收盤價的最新交易日（如 2330），避免因當日全市場尚未更新導致空訊號
+                var latestPriceDate = await _stockRepo.GetLatestPriceDateAsync("2330");
+                var marketDate = MarketDateHelper.GetTargetMarketDate();
+                targetDate = (latestPriceDate.HasValue && latestPriceDate.Value.Date < marketDate)
+                    ? latestPriceDate.Value.Date
+                    : marketDate;
+            }
 
             _logger.LogInformation("Manual trigger: Starting daily analysis for {Date:yyyy-MM-dd}", targetDate);
             await _analysisService.RunAnalysisAsync(targetDate);

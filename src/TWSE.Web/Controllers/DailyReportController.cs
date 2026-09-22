@@ -25,18 +25,25 @@ public class DailyReportController : ControllerBase
         }
         else
         {
-            targetDate = MarketDateHelper.GetTargetMarketDate();
+            // 優先取得資料庫最新訊號日，若無訊號則取市場營業基準日
+            var latestSignalDate = await _repo.GetLatestSignalDateAsync();
+            targetDate = latestSignalDate ?? MarketDateHelper.GetTargetMarketDate();
         }
 
         var signals = await _repo.GetDailySignalsAsync(targetDate);
         
-        if (!signals.Any())
+        // 若當前指定日無訊號，或訊號未包含全市場買賣推薦，自動回退至最新有有效訊號的交易日
+        if (!signals.Any(s => s.SignalType == "Buy" || s.SignalType == "Sell"))
         {
             var latestDate = await _repo.GetLatestSignalDateAsync();
-            if (latestDate.HasValue)
+            if (latestDate.HasValue && latestDate.Value.Date != targetDate.Date)
             {
-                targetDate = latestDate.Value;
-                signals = await _repo.GetDailySignalsAsync(targetDate);
+                var fallbackSignals = await _repo.GetDailySignalsAsync(latestDate.Value);
+                if (fallbackSignals.Any())
+                {
+                    targetDate = latestDate.Value;
+                    signals = fallbackSignals;
+                }
             }
         }
 
