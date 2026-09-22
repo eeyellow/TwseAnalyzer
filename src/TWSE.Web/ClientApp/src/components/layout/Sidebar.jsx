@@ -48,9 +48,9 @@ export default function Sidebar({
     },
     {
       id: 'analysis',
-      label: '策略自訂掃描',
+      label: '策略組合掃描',
       icon: SlidersHorizontal,
-      description: '多策略回測與持股健檢',
+      description: '多策略組合選股與持股健檢',
     },
   ];
 

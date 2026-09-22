@@ -56,6 +56,36 @@ export async function scanPortfolio(strategyFileName, myStocks) {
   return res.json();
 }
 
+export async function fetchCombos() {
+  const res = await fetch(`${API_BASE}/analysis/combos`);
+  return res.json();
+}
+
+export async function saveCombo(combo) {
+  const res = await fetch(`${API_BASE}/analysis/combos`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(combo),
+  });
+  return res.json();
+}
+
+export async function deleteCombo(id) {
+  const res = await fetch(`${API_BASE}/analysis/combos/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+  return res.json();
+}
+
+export async function scanCombo(params) {
+  const res = await fetch(`${API_BASE}/analysis/scan-combo`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  });
+  return res.json();
+}
+
 export async function fetchStocks() {
   const res = await fetch(`${API_BASE}/stocks`);
   return res.json();
