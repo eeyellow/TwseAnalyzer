@@ -129,7 +129,7 @@ export default function StrategyPage({ onOpenChart, onNavigate }) {
       }
     } catch (err) {
       console.error('Failed to load initial strategy data', err);
-      toast.show('載入策略資料失敗，請確認伺服器連線狀態。', 'error');
+      toast.error('載入策略資料失敗，請確認伺服器連線狀態。');
     }
   }, [toast]);
 
@@ -172,7 +172,7 @@ export default function StrategyPage({ onOpenChart, onNavigate }) {
   // 4. Save Current Selection as New Combo
   const handleOpenSaveModal = () => {
     if (selectedStrategyFiles.length === 0) {
-      toast.show('請至少選取一個策略才能儲存為組合！', 'error');
+      toast.warning('請至少選取一個策略才能儲存為組合！');
       return;
     }
     setNewComboName('');
@@ -183,7 +183,7 @@ export default function StrategyPage({ onOpenChart, onNavigate }) {
   const handleSaveCustomCombo = async (e) => {
     e.preventDefault();
     if (!newComboName.trim()) {
-      toast.show('請輸入策略組合名稱', 'error');
+      toast.warning('請輸入策略組合名稱');
       return;
     }
     setSavingCombo(true);
@@ -197,7 +197,7 @@ export default function StrategyPage({ onOpenChart, onNavigate }) {
       };
       const created = await saveCombo(payload);
       if (created) {
-        toast.show(`成功儲存策略組合「${created.name}」！`, 'success');
+        toast.success(`成功儲存策略組合「${created.name}」！`);
         setShowSaveModal(false);
         const updatedCombos = await fetchCombos();
         setCombos(updatedCombos || []);
@@ -205,7 +205,7 @@ export default function StrategyPage({ onOpenChart, onNavigate }) {
       }
     } catch (err) {
       console.error('Save combo error', err);
-      toast.show('儲存策略組合失敗', 'error');
+      toast.error('儲存策略組合失敗');
     } finally {
       setSavingCombo(false);
     }
@@ -218,7 +218,7 @@ export default function StrategyPage({ onOpenChart, onNavigate }) {
 
     try {
       await deleteCombo(comboId);
-      toast.show(`已刪除「${comboName}」`, 'success');
+      toast.success(`已刪除「${comboName}」`);
       const updatedCombos = await fetchCombos();
       setCombos(updatedCombos || []);
       if (selectedComboId === comboId) {
@@ -230,7 +230,7 @@ export default function StrategyPage({ onOpenChart, onNavigate }) {
       }
     } catch (err) {
       console.error('Delete combo error', err);
-      toast.show('刪除失敗', 'error');
+      toast.error('刪除失敗');
     }
   };
 
@@ -240,10 +240,10 @@ export default function StrategyPage({ onOpenChart, onNavigate }) {
     const nextSet = new Set(trackingCodes);
     if (nextSet.has(stockCode)) {
       nextSet.delete(stockCode);
-      toast.show(`已從自選清單移除 ${stockCode}`, 'info');
+      toast.info(`已從自選清單移除 ${stockCode}`);
     } else {
       nextSet.add(stockCode);
-      toast.show(`已加入自選清單 ${stockCode}`, 'success');
+      toast.success(`已加入自選清單 ${stockCode}`);
     }
     setTrackingCodes(nextSet);
     await saveLocalTracking(Array.from(nextSet));
@@ -252,7 +252,7 @@ export default function StrategyPage({ onOpenChart, onNavigate }) {
   // 7. Run Combo Scan
   const runScan = async () => {
     if (selectedStrategyFiles.length === 0) {
-      toast.show('請至少選取一個策略模型！', 'error');
+      toast.warning('請至少選取一個策略模型！');
       return;
     }
 
@@ -281,17 +281,16 @@ export default function StrategyPage({ onOpenChart, onNavigate }) {
         });
 
         if (res.results.length > 0) {
-          toast.show(
-            `掃描完成！共篩選出 ${res.results.length} 檔符合條件標的`,
-            'success'
+          toast.success(
+            `掃描完成！共篩選出 ${res.results.length} 檔符合條件標的`
           );
         } else {
-          toast.show('掃描完成，當前條件下未觸發訊號。', 'info');
+          toast.info('掃描完成，當前條件下未觸發訊號。');
         }
       }
     } catch (err) {
       console.error('Scan failed', err);
-      toast.show('掃描運算失敗，請稍候重試。', 'error');
+      toast.error('掃描運算失敗，請稍候重試。');
     } finally {
       setLoading(false);
     }

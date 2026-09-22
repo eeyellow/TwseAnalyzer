@@ -22,6 +22,7 @@ export function ToastProvider({ children }) {
   }, [removeToast]);
 
   const toast = {
+    show: (msg, type = 'info', dur) => addToast(msg, type, dur),
     success: (msg, dur) => addToast(msg, 'success', dur),
     error: (msg, dur) => addToast(msg, 'error', dur || 5000),
     info: (msg, dur) => addToast(msg, 'info', dur),
