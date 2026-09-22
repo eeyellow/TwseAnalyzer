@@ -1,0 +1,47 @@
+# Git and CI/CD
+.git
+.gitignore
+.gitattributes
+.github
+.dockerignore
+
+# Documentation & Specs
+README.md
+openspec
+.agent
+.claude
+.codex
+.opencode
+
+# Local Database & Dynamic Data
+data/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Logs & Diagnostics
+*.log
+inspector.log
+inspector2.log
+test_output.txt
+
+# Development Scratch Scripts
+check.cs
+test.cs
+test_yahoo.cs
+Reference_TwStock
+
+# Build outputs & dependencies
+**/bin/
+**/obj/
+**/node_modules/
+**/dist/
+
+# Environment and secrets
+.env
+.env.*
+appsettings*.local.json
+secrets.json
+*.pfx

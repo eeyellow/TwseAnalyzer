@@ -17,6 +17,8 @@ on:
 jobs:
   docker:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
 
     steps:
       - name: 檢出程式碼

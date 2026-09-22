@@ -487,13 +487,33 @@ $RECYCLE.BIN/
 *.db
 *.sqlite
 *.sqlite3
+*.db-shm
+*.db-wal
 
-# Test outputs
+# Test outputs and scratch scripts
 *.log
 test_output.txt
 inspector.log
 inspector2.log
+check.cs
+test.cs
 test_yahoo.cs
+
+# External reference folder
+Reference_TwStock/
+
+# Secrets & Environment Configurations
+.env
+.env.*
+secrets.json
+appsettings*.local.json
+appsettings.Production.json
+*.pfx
+*.p12
+*.key
+*.pem
+*.cer
+*.crt
 
 # Openspec
 .openspec/
@@ -501,4 +521,5 @@ test_yahoo.cs
 !src/TWSE.Core/Data
 !tests/TWSE.Tests/Data
 src/TWSE.Web/wwwroot
+
 
