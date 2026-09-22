@@ -16,33 +16,30 @@ public class AnalysisController : ControllerBase
     private readonly IStockRepository _repo;
     private readonly IConditionEvaluator _evaluator;
 
-    private static readonly Dictionary<string, (string Name, string Description)> DefaultStrategyMetadata = new(StringComparer.OrdinalIgnoreCase)
-    {
-        ["ma-golden-cross"] = ("均線金叉 (MA Golden Cross)", "5日線向上突破20日生命線，多頭排列動能確認"),
-        ["volume-breakout"] = ("量能突破 (Volume Breakout)", "成交量暴增突破5日均量且收紅棒，買盤積極介入"),
-        ["kd-oversold-turnaround"] = ("KD超賣低檔金叉 (KD Turnaround)", "K值自20以下低檔區黃金交叉D值，短線超跌強勁反彈"),
-        ["kd-reversal"] = ("KD指標反轉 (KD Reversal)", "KD低檔交叉買進，高檔交叉警戒賣出"),
-        ["golden-cross"] = ("均線黃金交叉 (Golden Cross)", "短期均線穿越中長期均線形成黃金交叉"),
-        ["ma-turnaround"] = ("均線翻揚轉折 (MA Turnaround)", "短均線由下彎轉為向上走揚，均線扣抵轉強"),
-        ["best-four-point"] = ("四大買賣點 (Best Four Points)", "葛蘭碧八大法則衍生之經典買賣折返點"),
-        ["oversold-bounce"] = ("乖離超跌反彈 (Oversold Bounce)", "股價急跌乖離率過大，技術面逢低強烈反彈"),
-        ["weekly-trend-mock"] = ("週線趨勢動能 (Weekly Trend)", "中長線多頭趨勢保護短線進場點")
-    };
-
     public AnalysisController(IStockRepository repo, IConditionEvaluator evaluator)
     {
         _repo = repo;
         _evaluator = evaluator;
     }
 
-    private static string GetStrategiesDirectory()
+    public static string GetStrategiesDirectory()
     {
+        var envPath = Environment.GetEnvironmentVariable("TWSE_STRATEGIES_PATH");
+        if (!string.IsNullOrEmpty(envPath) && Directory.Exists(envPath))
+            return Path.GetFullPath(envPath);
+
+        string? fallbackDir = null;
+
         var current = new DirectoryInfo(Directory.GetCurrentDirectory());
         while (current != null)
         {
             var candidate = Path.Combine(current.FullName, "strategies");
             if (Directory.Exists(candidate))
-                return candidate;
+            {
+                if (Directory.GetFiles(candidate, "*.json").Length > 0)
+                    return candidate;
+                fallbackDir ??= candidate;
+            }
             current = current.Parent;
         }
 
@@ -51,69 +48,39 @@ public class AnalysisController : ControllerBase
         {
             var candidate = Path.Combine(baseDir.FullName, "strategies");
             if (Directory.Exists(candidate))
-                return candidate;
+            {
+                if (Directory.GetFiles(candidate, "*.json").Length > 0)
+                    return candidate;
+                fallbackDir ??= candidate;
+            }
             baseDir = baseDir.Parent;
         }
 
-        return Path.Combine(Directory.GetCurrentDirectory(), "strategies");
-    }
-
-    private static string GetCombosDirectory()
-    {
-        var strategiesDir = GetStrategiesDirectory();
-        var combosDir = Path.Combine(strategiesDir, "combos");
-        if (!Directory.Exists(combosDir))
+        if (Directory.Exists("/app/strategies"))
         {
-            Directory.CreateDirectory(combosDir);
+            return "/app/strategies";
         }
-        return combosDir;
+
+        return fallbackDir ?? Path.Combine(Directory.GetCurrentDirectory(), "strategies");
     }
 
-    private static List<StrategyCombo> GetDefaultCombos()
+    private static string? GetCombosDirectory()
     {
-        return new List<StrategyCombo>
+        try
         {
-            new StrategyCombo
+            var strategiesDir = GetStrategiesDirectory();
+            var combosDir = Path.Combine(strategiesDir, "combos");
+            if (!Directory.Exists(combosDir))
             {
-                Id = "combo-momentum",
-                Name = "動能突破強勢組合 (MA金叉 + 爆量)",
-                Description = "結合均線黃金交叉與成交量突破，尋找放量起漲的強勢多頭動能股",
-                StrategyFileNames = new List<string> { "ma-golden-cross.json", "volume-breakout.json" },
-                LogicMode = "AND",
-                MinScorePercent = 100,
-                IsBuiltIn = true
-            },
-            new StrategyCombo
-            {
-                Id = "combo-reversal",
-                Name = "超跌築底反彈組合 (KD超賣 + 均線轉折)",
-                Description = "尋找短線嚴重超賣、KD指標低檔黃金交叉並伴隨均線止跌翻揚的轉折標的",
-                StrategyFileNames = new List<string> { "kd-oversold-turnaround.json", "ma-turnaround.json" },
-                LogicMode = "OR",
-                MinScorePercent = 50,
-                IsBuiltIn = true
-            },
-            new StrategyCombo
-            {
-                Id = "combo-multi-factor",
-                Name = "全方位多頭共振組合 (均線 + 量能 + KD反轉)",
-                Description = "三大指標綜合評估，滿足過半條件（評分制）即視為多頭共振訊號",
-                StrategyFileNames = new List<string> { "ma-golden-cross.json", "volume-breakout.json", "kd-oversold-turnaround.json" },
-                LogicMode = "SCORE",
-                MinScorePercent = 66,
-                IsBuiltIn = true
-            },
-            new StrategyCombo
-            {
-                Id = "combo-four-points",
-                Name = "經典四大買賣點組合",
-                Description = "以葛蘭碧與精準短線折返為核心，搭配量能突破確認趨勢強度",
-                StrategyFileNames = new List<string> { "best-four-point.json", "volume-breakout.json" },
-                LogicMode = "AND",
-                MinScorePercent = 100,
-                IsBuiltIn = true
+                Directory.CreateDirectory(combosDir);
             }
-        };
+            return combosDir;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[TWSE.Web] Note: Could not access combos directory: {ex.Message}");
+            return null;
+        }
     }
 
     [HttpGet("strategies")]
@@ -136,12 +103,6 @@ public class AnalysisController : ControllerBase
             string description = "自訂量化條件策略模型";
             int entryCount = 0;
             int exitCount = 0;
-
-            if (DefaultStrategyMetadata.TryGetValue(baseName, out var meta))
-            {
-                name = meta.Name;
-                description = meta.Description;
-            }
 
             try
             {
@@ -171,7 +132,7 @@ public class AnalysisController : ControllerBase
             }
             catch
             {
-                // Fallback to defaults if json parse error
+                // Fallback to filename
             }
 
             list.Add(new
@@ -191,30 +152,36 @@ public class AnalysisController : ControllerBase
     [HttpGet("combos")]
     public async Task<IActionResult> GetCombos()
     {
-        var combos = GetDefaultCombos();
+        var combos = new List<StrategyCombo>();
         var combosDir = GetCombosDirectory();
 
-        if (Directory.Exists(combosDir))
+        if (!string.IsNullOrEmpty(combosDir) && Directory.Exists(combosDir))
         {
-            var files = Directory.GetFiles(combosDir, "*.json");
-            foreach (var f in files)
+            try
             {
-                try
+                var files = Directory.GetFiles(combosDir, "*.json");
+                foreach (var f in files)
                 {
-                    var json = await System.IO.File.ReadAllTextAsync(f);
-                    var userCombo = JsonSerializer.Deserialize<StrategyCombo>(json);
-                    if (userCombo != null && !string.IsNullOrEmpty(userCombo.Id))
+                    try
                     {
-                        userCombo.IsBuiltIn = false;
-                        // Avoid duplicates if built-in overwritten
-                        combos.RemoveAll(c => c.Id.Equals(userCombo.Id, StringComparison.OrdinalIgnoreCase));
-                        combos.Add(userCombo);
+                        var json = await System.IO.File.ReadAllTextAsync(f);
+                        var userCombo = JsonSerializer.Deserialize<StrategyCombo>(json);
+                        if (userCombo != null && !string.IsNullOrEmpty(userCombo.Id))
+                        {
+                            userCombo.IsBuiltIn = false;
+                            combos.RemoveAll(c => c.Id.Equals(userCombo.Id, StringComparison.OrdinalIgnoreCase));
+                            combos.Add(userCombo);
+                        }
+                    }
+                    catch
+                    {
+                        // Ignore individual corrupt combo file
                     }
                 }
-                catch
-                {
-                    // Ignore corrupted combo files
-                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[TWSE.Web] Note: Could not read custom combos directory: {ex.Message}");
             }
         }
 
@@ -239,11 +206,20 @@ public class AnalysisController : ControllerBase
         combo.CreatedAt = DateTime.UtcNow;
 
         var combosDir = GetCombosDirectory();
-        var safeId = string.Concat(combo.Id.Split(Path.GetInvalidFileNameChars()));
-        var filePath = Path.Combine(combosDir, $"{safeId}.json");
-
-        var json = JsonSerializer.Serialize(combo, new JsonSerializerOptions { WriteIndented = true });
-        await System.IO.File.WriteAllTextAsync(filePath, json);
+        if (!string.IsNullOrEmpty(combosDir))
+        {
+            try
+            {
+                var safeId = string.Concat(combo.Id.Split(Path.GetInvalidFileNameChars()));
+                var filePath = Path.Combine(combosDir, $"{safeId}.json");
+                var json = JsonSerializer.Serialize(combo, new JsonSerializerOptions { WriteIndented = true });
+                await System.IO.File.WriteAllTextAsync(filePath, json);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[TWSE.Web] Warning: Could not save combo to disk ({ex.Message}). Still returning created combo.");
+            }
+        }
 
         return Ok(combo);
     }
@@ -254,16 +230,23 @@ public class AnalysisController : ControllerBase
         if (string.IsNullOrWhiteSpace(id)) return BadRequest("無效的組合 ID。");
 
         var combosDir = GetCombosDirectory();
-        var safeId = string.Concat(id.Split(Path.GetInvalidFileNameChars()));
-        var filePath = Path.Combine(combosDir, $"{safeId}.json");
+        if (string.IsNullOrEmpty(combosDir)) return Ok(new { success = true });
 
-        if (System.IO.File.Exists(filePath))
+        try
         {
-            System.IO.File.Delete(filePath);
+            var safeId = string.Concat(id.Split(Path.GetInvalidFileNameChars()));
+            var filePath = Path.Combine(combosDir, $"{safeId}.json");
+
+            if (System.IO.File.Exists(filePath))
+            {
+                System.IO.File.Delete(filePath);
+            }
             return Ok(new { success = true });
         }
-
-        return NotFound("找不到該自訂策略組合。");
+        catch (Exception ex)
+        {
+            return BadRequest($"刪除失敗: {ex.Message}");
+        }
     }
 
     [HttpPost("scan-combo")]
@@ -275,31 +258,49 @@ public class AnalysisController : ControllerBase
         }
 
         var strategiesDir = GetStrategiesDirectory();
+        if (!Directory.Exists(strategiesDir))
+        {
+            return BadRequest($"找不到策略目錄 '{strategiesDir}'，請確認 strategies 目錄已建立並放入策略檔案。");
+        }
+
         var loadedConfigs = new List<(string FileName, string DisplayName, StrategyConfig Config)>();
 
         foreach (var fileName in request.StrategyFileNames.Distinct())
         {
             var safeFile = Path.GetFileName(fileName);
             var filePath = Path.Combine(strategiesDir, safeFile);
-            if (!System.IO.File.Exists(filePath)) continue;
 
-            var json = await System.IO.File.ReadAllTextAsync(filePath);
-            var config = JsonSerializer.Deserialize<StrategyConfig>(json);
-            if (config != null)
+            if (!System.IO.File.Exists(filePath))
             {
-                var baseName = Path.GetFileNameWithoutExtension(safeFile);
-                string displayName = baseName;
-                if (DefaultStrategyMetadata.TryGetValue(baseName, out var meta))
+                continue;
+            }
+
+            try
+            {
+                var json = await System.IO.File.ReadAllTextAsync(filePath);
+                var config = JsonSerializer.Deserialize<StrategyConfig>(json);
+                if (config != null)
                 {
-                    displayName = meta.Name;
+                    var baseName = Path.GetFileNameWithoutExtension(safeFile);
+                    string displayName = baseName;
+                    using var doc = JsonDocument.Parse(json);
+                    if (doc.RootElement.TryGetProperty("name", out var nProp) && !string.IsNullOrWhiteSpace(nProp.GetString()))
+                    {
+                        displayName = nProp.GetString()!;
+                    }
+
+                    loadedConfigs.Add((safeFile, displayName, config));
                 }
-                loadedConfigs.Add((safeFile, displayName, config));
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[TWSE.Web] Error reading strategy '{safeFile}': {ex.Message}");
             }
         }
 
         if (!loadedConfigs.Any())
         {
-            return BadRequest("找不到指定的策略設定檔。");
+            return BadRequest("未能在 strategies 目錄中找到或解析指定的策略設定檔，請確認檔案已上傳至伺服器。");
         }
 
         // 1. 取得標的名單
@@ -349,6 +350,18 @@ public class AnalysisController : ControllerBase
         else // "all"
         {
             targetCodes = allStocks.Select(s => s.Code).Distinct().ToList();
+            if (!targetCodes.Any())
+            {
+                return Ok(new
+                {
+                    totalTargetCount = 0,
+                    matchedCount = 0,
+                    targetScope = "all",
+                    logicMode = request.LogicMode,
+                    results = Array.Empty<ComboScanItemResult>(),
+                    message = "資料庫中尚無個股清單，請先至排程或儀表板執行台股資料更新。"
+                });
+            }
         }
 
         // 2. 載入市場最近 120 天日線快照 (單次 SQL 查詢，記憶體分組)
@@ -366,7 +379,6 @@ public class AnalysisController : ControllerBase
             var lastClose = history[lastIndex].Close;
             var volume = history[lastIndex].Volume;
 
-            // 總成交量過濾 (全市場時若有設定)
             if (request.MinVolume > 0 && volume < request.MinVolume)
                 return;
 
@@ -407,14 +419,12 @@ public class AnalysisController : ControllerBase
                 _ => matchedBuys.Count == totalStrategies
             };
 
-            // 出場訊號：防禦性考量，任一策略給出賣出訊號即示警
             bool isSell = matchedSells.Count > 0;
 
             string overallAction = "Hold";
             if (isSell) overallAction = "Sell";
             else if (isBuy) overallAction = "Buy";
 
-            // 納入判定：若為個人持股則全面列出健檢；若為自選或全市場則需有 Buy 或 Sell
             bool isPortfolio = request.TargetScope.Equals("portfolio", StringComparison.OrdinalIgnoreCase);
             bool shouldInclude = isPortfolio || isBuy || isSell;
 
@@ -498,12 +508,14 @@ public class AnalysisController : ControllerBase
         var strategyPath = Path.Combine(strategiesDir, safeFileName);
 
         if (!System.IO.File.Exists(strategyPath))
-            return BadRequest($"Strategy file '{request.StrategyFileName}' not found.");
+        {
+            return BadRequest($"在策略目錄 '{strategiesDir}' 中找不到策略檔案 '{request.StrategyFileName}'，請確認檔案已放置於該目錄。");
+        }
 
         var json = await System.IO.File.ReadAllTextAsync(strategyPath);
         var config = JsonSerializer.Deserialize<StrategyConfig>(json);
         if (config == null)
-            return BadRequest("Failed to parse strategy file.");
+            return BadRequest("無法解析策略設定檔內容。");
 
         var portfolio = request.MyStocks ?? new List<PortfolioItemDto>();
         var results = new List<StockSignalResult>();

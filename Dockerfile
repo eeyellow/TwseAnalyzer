@@ -23,9 +23,15 @@ RUN npm run build
 # 回到專案根目錄，符合應用程式相對於 data 與 strategies 資料夾的預期路徑
 WORKDIR /app
 
-# 定義要曝光的 Port
+# 預編譯 .NET 專案，確保離線環境與容器啟動即時可用
+RUN dotnet build src/TWSE.Web/TWSE.Web.csproj -c Release
+
+# 定義要曝光的 Port 與環境變數
 ENV ASPNETCORE_URLS=http://+:5000
+ENV ASPNETCORE_ENVIRONMENT=Production
+ENV DOTNET_RUNNING_IN_CONTAINER=true
+ENV TWSE_STRATEGIES_PATH=/app/strategies
 EXPOSE 5000
 
 # 啟動應用程式
-CMD ["dotnet", "run", "--no-launch-profile", "--project", "src/TWSE.Web/TWSE.Web.csproj"]
+CMD ["dotnet", "run", "--no-launch-profile", "--no-build", "-c", "Release", "--project", "src/TWSE.Web/TWSE.Web.csproj"]

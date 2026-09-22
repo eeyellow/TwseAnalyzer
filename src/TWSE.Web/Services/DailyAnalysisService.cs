@@ -65,24 +65,31 @@ public class DailyAnalysisService
                 }
             }
             strategiesDir ??= Path.Combine(Directory.GetCurrentDirectory(), "strategies");
-            
-            if (!Directory.Exists(strategiesDir))
+
+            var loadedStrategies = new List<(string Name, StrategyConfig Config)>();
+            if (Directory.Exists(strategiesDir))
             {
-                _logger.LogWarning("Strategies directory not found at {Path}", strategiesDir);
-                return;
+                var strategyFiles = Directory.GetFiles(strategiesDir, "*.json");
+                foreach (var file in strategyFiles)
+                {
+                    var strategyName = Path.GetFileNameWithoutExtension(file);
+                    try
+                    {
+                        var json = await File.ReadAllTextAsync(file);
+                        var config = JsonSerializer.Deserialize<StrategyConfig>(json);
+                        if (config != null)
+                        {
+                            loadedStrategies.Add((strategyName, config));
+                        }
+                    }
+                    catch { }
+                }
             }
 
-            var strategyFiles = Directory.GetFiles(strategiesDir, "*.json");
-            var loadedStrategies = new List<(string Name, StrategyConfig Config)>();
-            foreach (var file in strategyFiles)
+            if (!loadedStrategies.Any())
             {
-                var strategyName = Path.GetFileNameWithoutExtension(file);
-                var json = await File.ReadAllTextAsync(file);
-                var config = JsonSerializer.Deserialize<StrategyConfig>(json);
-                if (config != null)
-                {
-                    loadedStrategies.Add((strategyName, config));
-                }
+                _logger.LogWarning("在 strategies 目錄中未找到任何策略 JSON 設定檔，請確認已上傳策略檔案至伺服器目錄。");
+                return;
             }
 
             // 4.1 目前持股操作健檢

@@ -34,61 +34,73 @@ export async function saveLocalTracking(tracking) {
   await localforage.setItem('twse_tracking', tracking);
 }
 
+async function safeJsonFetch(url, options = {}, fallback = null) {
+  try {
+    const res = await fetch(url, options);
+    if (!res.ok) {
+      console.warn(`[API] HTTP ${res.status} for ${url}`);
+      return fallback;
+    }
+    const contentType = res.headers.get('content-type');
+    if (!contentType || !contentType.includes('application/json')) {
+      console.warn(`[API] Non-JSON content-type for ${url}`);
+      return fallback;
+    }
+    return await res.json();
+  } catch (err) {
+    console.error(`[API] Network error for ${url}:`, err);
+    return fallback;
+  }
+}
+
 // --- Stateless Server APIs ---
 export async function fetchStrategies() {
-  const res = await fetch(`${API_BASE}/analysis/strategies`);
-  return res.json();
+  return (await safeJsonFetch(`${API_BASE}/analysis/strategies`, {}, [])) || [];
 }
 
 export async function getDailyReport(date = null) {
   let url = `${API_BASE}/dailyreport`;
   if (date) url += `?date=${encodeURIComponent(date)}`;
-  const res = await fetch(url);
-  return res.json();
+  return safeJsonFetch(url, {}, null);
 }
 
 export async function scanPortfolio(strategyFileName, myStocks) {
-  const res = await fetch(`${API_BASE}/analysis/scan-portfolio`, {
+  return (await safeJsonFetch(`${API_BASE}/analysis/scan-portfolio`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ strategyFileName, myStocks }),
-  });
-  return res.json();
+  }, [])) || [];
 }
 
 export async function fetchCombos() {
-  const res = await fetch(`${API_BASE}/analysis/combos`);
-  return res.json();
+  return (await safeJsonFetch(`${API_BASE}/analysis/combos`, {}, [])) || [];
 }
 
 export async function saveCombo(combo) {
-  const res = await fetch(`${API_BASE}/analysis/combos`, {
+  return safeJsonFetch(`${API_BASE}/analysis/combos`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(combo),
-  });
-  return res.json();
+  }, null);
 }
 
 export async function deleteCombo(id) {
   const res = await fetch(`${API_BASE}/analysis/combos/${encodeURIComponent(id)}`, {
     method: 'DELETE',
   });
-  return res.json();
+  return res.ok;
 }
 
 export async function scanCombo(params) {
-  const res = await fetch(`${API_BASE}/analysis/scan-combo`, {
+  return (await safeJsonFetch(`${API_BASE}/analysis/scan-combo`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params),
-  });
-  return res.json();
+  }, { results: [], totalTargetCount: 0, matchedCount: 0 })) || { results: [], totalTargetCount: 0, matchedCount: 0 };
 }
 
 export async function fetchStocks() {
-  const res = await fetch(`${API_BASE}/stocks`);
-  return res.json();
+  return (await safeJsonFetch(`${API_BASE}/stocks`, {}, [])) || [];
 }
 
 export async function fetchPrices(stockCode, days = null) {

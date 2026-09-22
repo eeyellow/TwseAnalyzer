@@ -88,15 +88,18 @@ export default function StrategyPage({ onOpenChart, onNavigate }) {
   const loadInitialData = useCallback(async () => {
     try {
       const [stratList, comboList, port, track, stocks] = await Promise.all([
-        fetchStrategies(),
-        fetchCombos(),
-        getPortfolio(),
-        getLocalTracking(),
-        fetchStocks(),
+        fetchStrategies().catch(() => []),
+        fetchCombos().catch(() => []),
+        getPortfolio().catch(() => []),
+        getLocalTracking().catch(() => []),
+        fetchStocks().catch(() => []),
       ]);
 
-      setStrategies(stratList || []);
-      setCombos(comboList || []);
+      const validStrats = stratList || [];
+      const validCombos = comboList || [];
+
+      setStrategies(validStrats);
+      setCombos(validCombos);
       setPortfolio(port || []);
       setTrackingCodes(new Set(track || []));
       setAllStocksCount((stocks || []).length);
@@ -110,20 +113,23 @@ export default function StrategyPage({ onOpenChart, onNavigate }) {
         setTargetScope('all');
       }
 
-      // Default select the first combo
-      if (comboList && comboList.length > 0) {
-        const first = comboList[0];
+      // Default select the first combo or custom mode
+      if (validCombos.length > 0) {
+        const first = validCombos[0];
         setSelectedComboId(first.id);
         setSelectedStrategyFiles(first.strategyFileNames || []);
         setLogicMode(first.logicMode || 'AND');
         if (first.minScorePercent) setMinScorePercent(first.minScorePercent);
-      } else if (stratList && stratList.length > 0) {
+      } else if (validStrats.length > 0) {
         setSelectedComboId('custom');
-        setSelectedStrategyFiles([stratList[0].fileName]);
+        setSelectedStrategyFiles([validStrats[0].fileName]);
+      } else {
+        setSelectedComboId('custom');
+        setSelectedStrategyFiles([]);
       }
     } catch (err) {
       console.error('Failed to load initial strategy data', err);
-      toast.show('載入策略資料失敗，請重新整理。', 'error');
+      toast.show('載入策略資料失敗，請確認伺服器連線狀態。', 'error');
     }
   }, [toast]);
 
@@ -463,51 +469,77 @@ export default function StrategyPage({ onOpenChart, onNavigate }) {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
-            {strategies.map((strat) => {
-              const isChecked = selectedStrategyFiles.includes(strat.fileName);
-              return (
-                <div
-                  key={strat.fileName}
-                  onClick={() => handleToggleStrategy(strat.fileName)}
-                  className={`p-3 rounded-xl border cursor-pointer transition-all duration-200 relative group flex items-start gap-3 ${
-                    isChecked
-                      ? 'border-sky-500 bg-sky-500/10 dark:bg-sky-500/15 shadow-sm'
-                      : 'border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/40 hover:border-slate-300 dark:hover:border-slate-700'
-                  }`}
+          {strategies.length === 0 ? (
+            <div className="py-8 text-center text-slate-500 bg-amber-500/5 dark:bg-amber-500/10 rounded-xl border border-amber-500/20 p-6">
+              <AlertTriangle className="w-8 h-8 mx-auto mb-2.5 text-amber-500" />
+              <h4 className="text-sm font-bold text-slate-800 dark:text-slate-200">
+                尚未偵測到策略設定檔 (.json)
+              </h4>
+              <p className="text-xs text-slate-400 mt-1 max-w-md mx-auto leading-relaxed">
+                系統中目前無策略檔案。請將您的量化策略 JSON 檔案手動上傳至伺服器的{' '}
+                <code className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-sky-500 font-mono font-bold">
+                  strategies/
+                </code>{' '}
+                目錄，完成後點擊下方按鈕載入。
+              </p>
+              <div className="mt-4">
+                <Button
+                  variant="primary"
+                  size="xs"
+                  onClick={loadInitialData}
+                  icon={RefreshCw}
                 >
-                  <div className="mt-0.5 shrink-0">
-                    {isChecked ? (
-                      <CheckSquare className="w-4 h-4 text-sky-500" />
-                    ) : (
-                      <Square className="w-4 h-4 text-slate-400 group-hover:text-slate-500" />
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between gap-1">
-                      <h4 className="text-xs font-bold text-slate-900 dark:text-white truncate">
-                        {strat.name}
-                      </h4>
-                      {isChecked && (
-                        <span className="w-1.5 h-1.5 rounded-full bg-sky-500 animate-pulse" />
+                  重新整理載入策略
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2.5">
+              {strategies.map((strat) => {
+                const isChecked = selectedStrategyFiles.includes(strat.fileName);
+                return (
+                  <div
+                    key={strat.fileName}
+                    onClick={() => handleToggleStrategy(strat.fileName)}
+                    className={`p-3 rounded-xl border cursor-pointer transition-all duration-200 relative group flex items-start gap-3 ${
+                      isChecked
+                        ? 'border-sky-500 bg-sky-500/10 dark:bg-sky-500/15 shadow-sm'
+                        : 'border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/40 hover:border-slate-300 dark:hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="mt-0.5 shrink-0">
+                      {isChecked ? (
+                        <CheckSquare className="w-4 h-4 text-sky-500" />
+                      ) : (
+                        <Square className="w-4 h-4 text-slate-400 group-hover:text-slate-500" />
                       )}
                     </div>
-                    <p className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-2 mt-0.5 leading-relaxed">
-                      {strat.description}
-                    </p>
-                    <div className="flex items-center gap-1.5 mt-2 text-[10px] text-slate-400 font-mono">
-                      <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-emerald-600 dark:text-emerald-400">
-                        買入條件: {strat.entryCount || 1}
-                      </span>
-                      <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-rose-500">
-                        出場條件: {strat.exitCount || 1}
-                      </span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between gap-1">
+                        <h4 className="text-xs font-bold text-slate-900 dark:text-white truncate">
+                          {strat.name}
+                        </h4>
+                        {isChecked && (
+                          <span className="w-1.5 h-1.5 rounded-full bg-sky-500 animate-pulse" />
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400 line-clamp-2 mt-0.5 leading-relaxed">
+                        {strat.description}
+                      </p>
+                      <div className="flex items-center gap-1.5 mt-2 text-[10px] text-slate-400 font-mono">
+                        <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-emerald-600 dark:text-emerald-400">
+                          買入條件: {strat.entryCount || 1}
+                        </span>
+                        <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-rose-500">
+                          出場條件: {strat.exitCount || 1}
+                        </span>
+                      </div>
                     </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          )}
         </div>
       </Card>
 
