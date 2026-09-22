@@ -16,9 +16,18 @@ public class DailyReportController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<IActionResult> Get()
+    public async Task<IActionResult> Get([FromQuery] string? date = null)
     {
-        var targetDate = DateTime.Now.Date;
+        DateTime targetDate;
+        if (!string.IsNullOrEmpty(date) && DateTime.TryParse(date, out var parsedDate))
+        {
+            targetDate = parsedDate.Date;
+        }
+        else
+        {
+            targetDate = MarketDateHelper.GetTargetMarketDate();
+        }
+
         var signals = await _repo.GetDailySignalsAsync(targetDate);
         
         if (!signals.Any())

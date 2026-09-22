@@ -105,7 +105,7 @@ public class JobsController : ControllerBase
         {
             var targetDate = (!string.IsNullOrEmpty(date) && DateTime.TryParse(date, out var parsed))
                 ? parsed.Date
-                : GetTargetMarketDate();
+                : MarketDateHelper.GetTargetMarketDate();
 
             _logger.LogInformation("Manual trigger: Starting daily analysis for {Date:yyyy-MM-dd}", targetDate);
             await _analysisService.RunAnalysisAsync(targetDate);
@@ -116,22 +116,5 @@ public class JobsController : ControllerBase
             _logger.LogError(ex, "Failed to run analysis manually");
             return StatusCode(500, new { message = "分析失敗", error = ex.Message });
         }
-    }
-
-    private DateTime GetTargetMarketDate()
-    {
-        var now = DateTime.Now;
-        var target = now.Date;
-
-        if (now.Hour < 20)
-        {
-            target = target.AddDays(-1);
-        }
-
-        while (target.DayOfWeek == DayOfWeek.Saturday || target.DayOfWeek == DayOfWeek.Sunday)
-        {
-            target = target.AddDays(-1);
-        }
-        return target;
     }
 }

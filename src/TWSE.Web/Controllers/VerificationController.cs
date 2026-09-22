@@ -64,15 +64,7 @@ public class VerificationController : ControllerBase
         }
         else
         {
-            targetDate = DateTime.Now.Date;
-            if (DateTime.Now.Hour < 20)
-            {
-                targetDate = targetDate.AddDays(-1);
-            }
-            while (targetDate.DayOfWeek == DayOfWeek.Saturday || targetDate.DayOfWeek == DayOfWeek.Sunday)
-            {
-                targetDate = targetDate.AddDays(-1);
-            }
+            targetDate = MarketDateHelper.GetTargetMarketDate();
         }
 
         await _analysisService.RunAnalysisAsync(targetDate);

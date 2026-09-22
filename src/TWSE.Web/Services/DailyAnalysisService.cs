@@ -29,7 +29,7 @@ public class DailyAnalysisService
             // ==========================================
             // 步驟 1: 高效批次載入全市場最近 120 天日線快照 (單次 SQL 查詢，記憶體分組)
             // ==========================================
-            var allHistories = await stockRepo.GetMarketRecentPricesBatchAsync(120);
+            var allHistories = await stockRepo.GetMarketRecentPricesBatchAsync(120, targetDate);
 
             // ==========================================
             // 步驟 2: 迴歸驗證歷史訊號 (Forward Verification) - 使用記憶體快照
@@ -99,7 +99,8 @@ public class DailyAnalysisService
                 }
                 if (history == null || history.Count == 0) continue;
 
-                var lastIndex = history.Count - 1;
+                var lastIndex = history.FindLastIndex(p => p.Date.Date <= targetDate.Date);
+                if (lastIndex < 0) continue;
                 var lastClose = history[lastIndex].Close;
 
                 string action = "Hold";
@@ -171,14 +172,14 @@ public class DailyAnalysisService
             {
                 var code = kvp.Key;
                 var history = kvp.Value;
-                var lastIndex = history.Count - 1;
+                var lastIndex = history.FindLastIndex(p => p.Date.Date <= targetDate.Date);
+                if (lastIndex < 20) return;
                 var lastClose = history[lastIndex].Close;
                 var lastVol = history[lastIndex].Volume;
 
                 // 1. 流動性與噪聲判定 (20日均量 < 300張 視為低流動性冷門股/殭屍股，不推薦且隔離學習)
-                var vol20d = history.Count >= 20
-                    ? history.TakeLast(20).Average(p => p.Volume) / 1000m
-                    : lastVol / 1000m;
+                var past20 = history.Take(lastIndex + 1).TakeLast(20).ToList();
+                var vol20d = past20.Any() ? past20.Average(p => p.Volume) / 1000m : lastVol / 1000m;
 
                 bool isNoise = false;
                 string? noiseReason = null;

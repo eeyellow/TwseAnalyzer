@@ -40,8 +40,10 @@ export async function fetchStrategies() {
   return res.json();
 }
 
-export async function getDailyReport() {
-  const res = await fetch(`${API_BASE}/dailyreport`);
+export async function getDailyReport(date = null) {
+  let url = `${API_BASE}/dailyreport`;
+  if (date) url += `?date=${encodeURIComponent(date)}`;
+  const res = await fetch(url);
   return res.json();
 }
 

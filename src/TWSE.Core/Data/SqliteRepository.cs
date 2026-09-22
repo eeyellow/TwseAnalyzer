@@ -339,13 +339,15 @@ public class SqliteRepository : IStockRepository
 
     // --- 高效批次與自適應驗證實作 ---
 
-    public async Task<Dictionary<string, List<OHLCV>>> GetMarketRecentPricesBatchAsync(int lookbackDays = 120)
+    public async Task<Dictionary<string, List<OHLCV>>> GetMarketRecentPricesBatchAsync(int lookbackDays = 120, DateTime? referenceDate = null)
     {
         using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync();
-        var minDate = DateTime.Now.Date.AddDays(-lookbackDays).ToString("yyyy-MM-dd");
-        var sql = "SELECT code as StockCode, date as DateText, open, high, low, close, volume FROM daily_prices WHERE date >= @MinDate ORDER BY code, date ASC";
-        var dtoList = await connection.QueryAsync<dynamic>(sql, new { MinDate = minDate });
+        var refDate = referenceDate?.Date ?? DateTime.Now.Date;
+        var minDate = refDate.AddDays(-lookbackDays).ToString("yyyy-MM-dd");
+        var maxDate = refDate.ToString("yyyy-MM-dd");
+        var sql = "SELECT code as StockCode, date as DateText, open, high, low, close, volume FROM daily_prices WHERE date >= @MinDate AND date <= @MaxDate ORDER BY code, date ASC";
+        var dtoList = await connection.QueryAsync<dynamic>(sql, new { MinDate = minDate, MaxDate = maxDate });
 
         var dict = new Dictionary<string, List<OHLCV>>(StringComparer.OrdinalIgnoreCase);
         foreach (var d in dtoList)

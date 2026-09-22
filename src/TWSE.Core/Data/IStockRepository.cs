@@ -25,7 +25,7 @@ public interface IStockRepository
     Task<DateTime?> GetLatestSignalDateAsync();
 
     // Signal Tracking & Adaptive Verification
-    Task<Dictionary<string, List<OHLCV>>> GetMarketRecentPricesBatchAsync(int lookbackDays = 120);
+    Task<Dictionary<string, List<OHLCV>>> GetMarketRecentPricesBatchAsync(int lookbackDays = 120, DateTime? referenceDate = null);
     Task<Dictionary<string, List<OHLCV>>> GetHistoricalPricesRangeBatchAsync(DateTime startDate, DateTime endDate);
     Task BatchInsertSignalTrackingAsync(IEnumerable<SignalTrackingItem> items);
     Task<List<SignalTrackingItem>> GetPendingSignalTrackingAsync();

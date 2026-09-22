@@ -16,6 +16,7 @@ import Button from '../components/common/Button';
 import Badge from '../components/common/Badge';
 import BeginnerGuideBanner from '../components/common/BeginnerGuideBanner';
 import SimulationReplayPanel from '../components/simulation/SimulationReplayPanel';
+import SimpleTomorrowBoard from '../components/scheduled/SimpleTomorrowBoard';
 import {
   RefreshCw,
   Zap,
@@ -61,6 +62,9 @@ export default function ScheduledPage({ onOpenChart, onNavigate }) {
   const [affinitySearch, setAffinitySearch] = useState('');
   const [customRunDate, setCustomRunDate] = useState('');
 
+  // View Mode: 'simple' (明日作戰決策) | 'lab' (深度量化實驗室)
+  const [viewMode, setViewMode] = useState('simple');
+
   // Loading actions
   const [updating, setUpdating] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
@@ -74,33 +78,37 @@ export default function ScheduledPage({ onOpenChart, onNavigate }) {
   const [page, setPage] = useState(1);
   const pageSize = 10;
 
-  const fetchReport = useCallback(async () => {
-    setLoading(true);
-    try {
-      const [p, report, stocks, vSummary, vHistory] = await Promise.all([
-        getPortfolio(),
-        getDailyReport(),
-        fetchStocks(),
-        getVerificationSummary(60).catch(() => null),
-        getVerificationHistory(100).catch(() => []),
-      ]);
-      setPortfolio(p || []);
-      setAllStocks(stocks || []);
-      if (report) {
-        setReportDate(report.date);
-        setSignals(report.signals || []);
-        setPortfolioAnalysis(report.portfolioAnalysis || []);
-        setRecommendedBuys(report.recommendedBuys || []);
-        setRecommendedSells(report.recommendedSells || []);
+  const fetchReport = useCallback(
+    async (date = null) => {
+      setLoading(true);
+      try {
+        const targetDate = date !== null ? date : customRunDate || null;
+        const [p, report, stocks, vSummary, vHistory] = await Promise.all([
+          getPortfolio(),
+          getDailyReport(targetDate),
+          fetchStocks(),
+          getVerificationSummary(60).catch(() => null),
+          getVerificationHistory(100).catch(() => []),
+        ]);
+        setPortfolio(p || []);
+        setAllStocks(stocks || []);
+        if (report) {
+          setReportDate(report.date);
+          setSignals(report.signals || []);
+          setPortfolioAnalysis(report.portfolioAnalysis || []);
+          setRecommendedBuys(report.recommendedBuys || []);
+          setRecommendedSells(report.recommendedSells || []);
+        }
+        if (vSummary) setVerificationSummary(vSummary);
+        if (vHistory) setVerificationHistory(vHistory);
+      } catch (err) {
+        toast.error(`載入報告失敗: ${err.message}`);
+      } finally {
+        setLoading(false);
       }
-      if (vSummary) setVerificationSummary(vSummary);
-      if (vHistory) setVerificationHistory(vHistory);
-    } catch (err) {
-      toast.error(`載入報告失敗: ${err.message}`);
-    } finally {
-      setLoading(false);
-    }
-  }, [toast]);
+    },
+    [toast, customRunDate]
+  );
 
   useEffect(() => {
     fetchReport();
@@ -226,29 +234,58 @@ export default function ScheduledPage({ onOpenChart, onNavigate }) {
       {/* Page Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <h1 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">
-              每日盤前策略分析與自適應學習
+              明日作戰決策與盤前策略
             </h1>
             {reportDate && (
-              <span className="text-xs px-2.5 py-1 rounded-full bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-medium">
-                基準日：{fmtDate(reportDate)}
+              <span className="text-xs px-2.5 py-1 rounded-full bg-sky-50 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 border border-sky-200 dark:border-sky-800 font-semibold flex items-center gap-1.5">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                結算基準日：{fmtDate(reportDate)}（今日收盤）
               </span>
             )}
           </div>
-          <div className="flex items-center gap-1.5 text-xs text-sky-600 dark:text-sky-400 mt-1 font-medium">
-            <Clock className="w-3.5 h-3.5" />
+          <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-slate-400 mt-1">
+            <Clock className="w-3.5 h-3.5 text-sky-500" />
             <span>
-              定時排程：每天晚上 20:00 (8:00 PM) 自動執行全盤分析與次日迴歸驗證
+              定時排程：每天晚上 20:00 (8:00 PM) 自動以今日最新收盤資料擬定明日作戰指引
             </span>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        {/* 模式切換與快捷操作 */}
+        <div className="flex flex-wrap items-center gap-3">
+          {/* 雙模式切換 Segmented Switch */}
+          <div className="flex items-center p-1 rounded-xl bg-slate-100 dark:bg-slate-800/90 border border-slate-200 dark:border-slate-700/60 shadow-xs">
+            <button
+              type="button"
+              onClick={() => setViewMode('simple')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                viewMode === 'simple'
+                  ? 'bg-sky-500 text-white shadow-sm'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <Zap className="w-3.5 h-3.5" />
+              ⚡ 明日作戰決策 (極簡)
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('lab')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                viewMode === 'lab'
+                  ? 'bg-purple-600 text-white shadow-sm'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+              }`}
+            >
+              <BrainCircuit className="w-3.5 h-3.5" />
+              🔬 深度量化實驗室
+            </button>
+          </div>
+
           {/* 指定日期運算 (可選) */}
           <div className="flex items-center gap-1 px-2.5 py-1 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#0d121f] text-xs shadow-2xs">
             <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-            <span className="text-slate-400 text-[11px] hidden sm:inline">指定日期:</span>
             <input
               type="date"
               value={customRunDate}
@@ -259,7 +296,10 @@ export default function ScheduledPage({ onOpenChart, onNavigate }) {
             {customRunDate && (
               <button
                 type="button"
-                onClick={() => setCustomRunDate('')}
+                onClick={() => {
+                  setCustomRunDate('');
+                  fetchReport();
+                }}
                 className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 ml-1 text-xs"
                 title="清除指定日期"
               >
@@ -286,16 +326,29 @@ export default function ScheduledPage({ onOpenChart, onNavigate }) {
             disabled={updating || analyzing || verifying}
             icon={Zap}
           >
-            {customRunDate ? `分析指定日期 (${customRunDate})` : '立即手動運算'}
+            {customRunDate ? `分析 (${customRunDate})` : '立即手動運算'}
           </Button>
         </div>
       </div>
 
-      {/* 新手快速指引橫幅 */}
-      <BeginnerGuideBanner />
+      {/* 雙模式主內容區域 */}
+      {viewMode === 'simple' ? (
+        <SimpleTomorrowBoard
+          portfolioAnalysis={portfolioAnalysis}
+          recommendedBuys={recommendedBuys}
+          recommendedSells={recommendedSells}
+          reportDate={reportDate}
+          onOpenChart={onOpenChart}
+          onNavigate={onNavigate}
+          onSwitchToLab={() => setViewMode('lab')}
+        />
+      ) : (
+        <>
+          {/* 新手快速指引橫幅 */}
+          <BeginnerGuideBanner />
 
-      {/* Navigation Tabs */}
-      <Card>
+          {/* Navigation Tabs */}
+          <Card>
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-6 pb-4 border-b border-slate-100 dark:border-slate-800">
           <div className="flex flex-wrap items-center gap-1.5 p-1 rounded-xl bg-slate-100 dark:bg-slate-800/80 shrink-0">
             <button
@@ -1335,6 +1388,8 @@ export default function ScheduledPage({ onOpenChart, onNavigate }) {
           </div>
         </div>
       </Card>
+        </>
+      )}
     </div>
   );
 }
