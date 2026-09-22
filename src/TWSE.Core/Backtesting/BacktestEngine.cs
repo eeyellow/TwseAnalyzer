@@ -37,73 +37,26 @@ public class BacktestEngine : IBacktestEngine
         DateTime? startDate = DateTime.TryParse(backtestParams.StartDate, out var sd) ? sd.Date : null;
         DateTime? endDate = DateTime.TryParse(backtestParams.EndDate, out var ed) ? ed.Date : null;
 
-        // Find the index where evaluation starts (preserving previous data for indicator warmup)
-        int startIndex = 0;
-        if (startDate.HasValue)
-        {
-            startIndex = -1;
-            for (int k = 0; k < history.Count; k++)
-            {
-                if (history[k].Date.Date >= startDate.Value)
-                {
-                    startIndex = k;
-                    break;
-                }
-            }
-            if (startIndex < 0 || startIndex >= history.Count - 1)
-            {
-                return Task.FromResult(result); // No data within test window
-            }
-        }
-
-        int endIndex = history.Count - 1;
-        if (endDate.HasValue)
-        {
-            for (int k = history.Count - 1; k >= startIndex; k--)
-            {
-                if (history[k].Date.Date <= endDate.Value)
-                {
-                    endIndex = k;
-                    break;
-                }
-            }
-        }
-
-        if (endIndex <= startIndex) return Task.FromResult(result);
-
-        decimal cash = result.InitialCapital;
+        // Run continuous simulation through the entire history to establish the canonical trade record
+        decimal initialCash = backtestParams.InitialCapital > 0 ? backtestParams.InitialCapital : 1000000m;
+        decimal positionSize = backtestParams.PositionSize > 0 ? backtestParams.PositionSize : initialCash;
+        decimal cash = initialCash;
         TradeRecord? openTrade = null;
-        decimal peakCapital = cash;
-        decimal maxDrawdown = 0;
-        var dailyReturns = new List<decimal>();
-        decimal previousEquity = cash;
+        var allTrades = new List<TradeRecord>();
+        var dailyEquities = new List<decimal>();
 
-        for (int i = startIndex; i <= endIndex; i++)
+        for (int i = 0; i < history.Count; i++)
         {
             var currentDay = history[i];
-
-            // Mark-to-market daily equity (Cash + Current Holding Market Value)
             decimal dailyEquity = cash + (openTrade != null ? openTrade.Quantity * currentDay.Close : 0m);
+            dailyEquities.Add(dailyEquity);
 
-            if (i > startIndex && previousEquity > 0)
-            {
-                decimal dailyReturn = (dailyEquity - previousEquity) / previousEquity;
-                dailyReturns.Add(dailyReturn);
-            }
-            previousEquity = dailyEquity;
-
-            if (dailyEquity > peakCapital) peakCapital = dailyEquity;
-            decimal drawdown = peakCapital > 0 ? (peakCapital - dailyEquity) / peakCapital : 0;
-            if (drawdown > maxDrawdown) maxDrawdown = drawdown;
-
-            // Signal evaluation and execution for the next trading day
-            if (i < endIndex)
+            if (i < history.Count - 1)
             {
                 var nextDay = history[i + 1];
 
                 if (openTrade == null)
                 {
-                    // Multi-strategy entry condition evaluation
                     int matchedEntries = 0;
                     foreach (var cfg in configs)
                     {
@@ -131,33 +84,30 @@ public class BacktestEngine : IBacktestEngine
                         decimal price = nextDay.Open;
                         if (price > 0)
                         {
-                            int maxShares = (int)(backtestParams.PositionSize / price);
+                            int maxShares = (int)(positionSize / price);
                             int quantity = (maxShares / 1000) * 1000;
 
-                            if (quantity == 0 && cash >= price * 1000 && backtestParams.PositionSize >= price)
+                            // For high-priced stocks, allow trading at least 1 unit (1000 shares)
+                            if (quantity == 0)
                             {
-                                quantity = 1000; // Allow at least 1 unit if funds permit
+                                quantity = 1000;
                             }
 
-                            if (quantity > 0 && cash >= quantity * price)
+                            openTrade = new TradeRecord
                             {
-                                openTrade = new TradeRecord
-                                {
-                                    StockCode = stockCode,
-                                    BuyDate = nextDay.Date,
-                                    BuyPrice = price,
-                                    Quantity = quantity,
-                                    CommissionRate = backtestParams.CommissionRate,
-                                    TaxRate = backtestParams.TaxRate
-                                };
-                                cash -= openTrade.TotalCost;
-                            }
+                                StockCode = stockCode,
+                                BuyDate = nextDay.Date,
+                                BuyPrice = price,
+                                Quantity = quantity,
+                                CommissionRate = backtestParams.CommissionRate,
+                                TaxRate = backtestParams.TaxRate
+                            };
+                            cash -= openTrade.TotalCost;
                         }
                     }
                 }
                 else
                 {
-                    // Multi-strategy exit condition evaluation (any strategy triggering exit exits trade)
                     bool isSell = configs.Any(cfg => cfg.Exit != null && cfg.Exit.Any() && _evaluator.EvaluateAll(cfg.Exit, history, i));
 
                     if (isSell)
@@ -169,7 +119,7 @@ public class BacktestEngine : IBacktestEngine
                             openTrade.SellPrice = price;
 
                             cash += openTrade.TotalRevenue ?? 0;
-                            result.Trades.Add(openTrade);
+                            allTrades.Add(openTrade);
                             openTrade = null;
                         }
                     }
@@ -177,33 +127,106 @@ public class BacktestEngine : IBacktestEngine
             }
         }
 
-        // Force close at the end of the backtest period if still open
+        // Close open trade at end of history
         if (openTrade != null)
         {
-            var lastDay = history[endIndex];
+            var lastDay = history[^1];
             openTrade.SellDate = lastDay.Date;
             openTrade.SellPrice = lastDay.Close;
             cash += openTrade.TotalRevenue ?? 0;
-            result.Trades.Add(openTrade);
+            allTrades.Add(openTrade);
             openTrade = null;
         }
 
-        result.FinalCapital = cash;
-        result.MaxDrawdown = maxDrawdown;
+        // Interval filtering: trades belonging to [startDate, endDate]
+        var filteredTrades = allTrades.Where(t =>
+            (!startDate.HasValue || t.BuyDate.Date >= startDate.Value) &&
+            (!endDate.HasValue || t.BuyDate.Date <= endDate.Value)
+        ).ToList();
 
-        // Calculate Annualized Return based on test window span
-        double days = (history[endIndex].Date - history[startIndex].Date).TotalDays;
-        if (days > 0 && (1 + result.TotalReturn) > 0)
+        result.Trades = filteredTrades;
+
+        // Cumulative compound return of interval trades
+        decimal compoundReturn = 1m;
+        foreach (var t in filteredTrades)
         {
-            result.AnnualizedReturn = (decimal)(Math.Pow((double)(1 + result.TotalReturn), 365.0 / days) - 1);
+            compoundReturn *= (1m + (t.ReturnRate ?? 0m));
         }
 
-        // Calculate Annualized Sharpe Ratio based on daily equity returns
-        if (dailyReturns.Count > 1)
+        if (filteredTrades.Count > 0)
         {
-            decimal avgDailyReturn = dailyReturns.Average();
-            decimal sumOfSquares = dailyReturns.Select(val => (val - avgDailyReturn) * (val - avgDailyReturn)).Sum();
-            decimal stdDev = (decimal)Math.Sqrt((double)sumOfSquares / (dailyReturns.Count - 1));
+            result.FinalCapital = Math.Round(result.InitialCapital * compoundReturn, 2);
+        }
+        else
+        {
+            result.FinalCapital = result.InitialCapital;
+        }
+
+        // Window boundary indices for equity curve analysis
+        int startIndex = 0;
+        if (startDate.HasValue)
+        {
+            for (int k = 0; k < history.Count; k++)
+            {
+                if (history[k].Date.Date >= startDate.Value)
+                {
+                    startIndex = k;
+                    break;
+                }
+            }
+        }
+
+        int endIndex = history.Count - 1;
+        if (endDate.HasValue)
+        {
+            for (int k = history.Count - 1; k >= startIndex; k--)
+            {
+                if (history[k].Date.Date <= endDate.Value)
+                {
+                    endIndex = k;
+                    break;
+                }
+            }
+        }
+
+        // Calculate Annualized Return based on test window span
+        DateTime windowStart = startDate.HasValue ? startDate.Value : history[startIndex].Date.Date;
+        DateTime windowEnd = endDate.HasValue ? endDate.Value : history[endIndex].Date.Date;
+        double days = (windowEnd - windowStart).TotalDays;
+        if (days > 30 && (1m + result.TotalReturn) > 0m)
+        {
+            result.AnnualizedReturn = (decimal)(Math.Pow((double)(1m + result.TotalReturn), 365.0 / days) - 1);
+        }
+        else
+        {
+            result.AnnualizedReturn = result.TotalReturn;
+        }
+
+        // Max drawdown and Sharpe ratio within the requested interval window
+        decimal intervalPeak = dailyEquities[startIndex];
+        decimal intervalMaxDrawdown = 0;
+        var intervalDailyReturns = new List<decimal>();
+
+        for (int k = startIndex; k <= endIndex; k++)
+        {
+            decimal eq = dailyEquities[k];
+            if (eq > intervalPeak) intervalPeak = eq;
+            decimal dd = intervalPeak > 0 ? (intervalPeak - eq) / intervalPeak : 0;
+            if (dd > intervalMaxDrawdown) intervalMaxDrawdown = dd;
+
+            if (k > startIndex && dailyEquities[k - 1] > 0)
+            {
+                intervalDailyReturns.Add((eq - dailyEquities[k - 1]) / dailyEquities[k - 1]);
+            }
+        }
+
+        result.MaxDrawdown = intervalMaxDrawdown;
+
+        if (intervalDailyReturns.Count > 1)
+        {
+            decimal avgDailyReturn = intervalDailyReturns.Average();
+            decimal sumOfSquares = intervalDailyReturns.Select(val => (val - avgDailyReturn) * (val - avgDailyReturn)).Sum();
+            decimal stdDev = (decimal)Math.Sqrt((double)sumOfSquares / (intervalDailyReturns.Count - 1));
 
             if (stdDev > 0)
             {

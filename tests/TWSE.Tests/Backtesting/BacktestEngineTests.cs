@@ -136,4 +136,64 @@ public class BacktestEngineTests
         var resultOr = await _engine.RunComboAsync("2330", new List<StrategyConfig> { configA, configB }, "OR", 50, backtestParams, data);
         Assert.True(resultOr.TotalTrades > 0);
     }
+
+    [Fact]
+    public async Task RunComboAsync_ShorterIntervals_ShouldBeStrictSubsetsOfLongerIntervals()
+    {
+        var data = new List<OHLCV>();
+        var baseDate = new DateTime(2020, 1, 1);
+        decimal price = 100m;
+        for (int i = 0; i < 1000; i++)
+        {
+            price += (decimal)Math.Sin(i * 0.1) * 3m;
+            if (price < 10) price = 10;
+            data.Add(new OHLCV
+            {
+                StockCode = "2330",
+                Date = baseDate.AddDays(i),
+                Open = price,
+                High = price + 1,
+                Low = price - 1,
+                Close = price,
+                Volume = 5000
+            });
+        }
+
+        var config = new StrategyConfig
+        {
+            Entry = new List<string> { "Close greater_than SMA(10)" },
+            Exit = new List<string> { "Close less_than SMA(10)" }
+        };
+
+        var allParams = new BacktestParams { InitialCapital = 1000000, PositionSize = 1000000 };
+        var y3Params = new BacktestParams { InitialCapital = 1000000, PositionSize = 1000000, StartDate = baseDate.AddDays(300).ToString("yyyy-MM-dd") };
+        var y2Params = new BacktestParams { InitialCapital = 1000000, PositionSize = 1000000, StartDate = baseDate.AddDays(600).ToString("yyyy-MM-dd") };
+        var y1Params = new BacktestParams { InitialCapital = 1000000, PositionSize = 1000000, StartDate = baseDate.AddDays(800).ToString("yyyy-MM-dd") };
+
+        var resAll = await _engine.RunComboAsync("2330", new List<StrategyConfig> { config }, "AND", 100, allParams, data);
+        var res3Y = await _engine.RunComboAsync("2330", new List<StrategyConfig> { config }, "AND", 100, y3Params, data);
+        var res2Y = await _engine.RunComboAsync("2330", new List<StrategyConfig> { config }, "AND", 100, y2Params, data);
+        var res1Y = await _engine.RunComboAsync("2330", new List<StrategyConfig> { config }, "AND", 100, y1Params, data);
+
+        Assert.True(resAll.TotalTrades >= res3Y.TotalTrades);
+        Assert.True(res3Y.TotalTrades >= res2Y.TotalTrades);
+        Assert.True(res2Y.TotalTrades >= res1Y.TotalTrades);
+
+        // Every trade in 1Y must appear identically in 2Y, 3Y, and All
+        foreach (var t1 in res1Y.Trades)
+        {
+            var match2 = res2Y.Trades.FirstOrDefault(t => t.BuyDate == t1.BuyDate);
+            Assert.NotNull(match2);
+            Assert.Equal(t1.BuyPrice, match2.BuyPrice);
+            Assert.Equal(t1.SellDate, match2.SellDate);
+            Assert.Equal(t1.SellPrice, match2.SellPrice);
+            Assert.Equal(t1.ReturnRate, match2.ReturnRate);
+
+            var matchAll = resAll.Trades.FirstOrDefault(t => t.BuyDate == t1.BuyDate);
+            Assert.NotNull(matchAll);
+            Assert.Equal(t1.BuyPrice, matchAll.BuyPrice);
+            Assert.Equal(t1.SellDate, matchAll.SellDate);
+            Assert.Equal(t1.SellPrice, matchAll.SellPrice);
+        }
+    }
 }

@@ -492,6 +492,7 @@ $RECYCLE.BIN/
 
 # Test outputs and scratch scripts
 *.log
+*.png
 test_output.txt
 inspector.log
 inspector2.log
