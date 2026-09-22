@@ -1,0 +1,59 @@
+name: Build and Push Docker Image
+
+on:
+  push:
+    branches:
+      - master
+    tags:
+      - 'v*.*.*'
+      - 'v*.*'
+  workflow_dispatch:
+    inputs:
+      custom_tag:
+        description: '自訂額外 Tag (例如 1.5，留空則僅產出 latest 與 sha)'
+        required: false
+        default: ''
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 檢出程式碼
+        uses: actions/checkout@v4
+
+      - name: 設定 Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 登入 Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: 計算 Docker 標籤 (Tags)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: eeyellow/twse
+          tags: |
+            # master 分支推動時固定打上 latest
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
+            # Git Tag 推動時自動擷取版本號 (例如 v1.5 -> 1.5)
+            type=semver,pattern={{version}}
+            # 每次 build 都保留 short SHA 作為追溯版本 (例如 eeyellow/twse:sha-xxxxxxx)
+            type=sha,prefix=sha-,format=short
+            # 手動觸發時若有輸入 custom_tag
+            type=raw,value=${{ github.event.inputs.custom_tag }},enable=${{ github.event.inputs.custom_tag != '' }}
+
+      - name: 建置並推送映像檔
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # 啟用 GitHub Actions 快取以大幅加速 build 流程
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
