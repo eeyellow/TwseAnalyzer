@@ -42,10 +42,13 @@ jobs:
           tags: |
             # master 推送或建立 tag 時，皆同步更新 latest
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/') }}
-            # 推送 Git Tag 時，直接使用原始 Tag 名稱 (例如 v1.6)
-            type=ref,event=tag
+            # 推送 Git Tag 時，若開頭為 v 則自動去除 v (例如 v1.6 -> 1.6)
+            type=match,pattern=v(.*),group=1
+            # 若 Git Tag 本身即未帶 v，則直接保留數字版本 (例如 1.6 -> 1.6)
+            type=match,pattern=^([0-9].*),group=1
             # 手動觸發時若有輸入 custom_tag
             type=raw,value=${{ github.event.inputs.custom_tag }},enable=${{ github.event.inputs.custom_tag != '' }}
+
 
 
       - name: 建置並推送映像檔
