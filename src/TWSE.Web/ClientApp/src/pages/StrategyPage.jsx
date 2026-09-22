@@ -13,10 +13,8 @@ import {
 } from '../api';
 import {
   fmtCurrency,
-  fmtDate,
   fmtPercent,
   fmtVolume,
-  fmtNumber,
 } from '../utils/formatters';
 import { useToast } from '../context/ToastContext';
 import Card from '../components/common/Card';
@@ -123,12 +121,15 @@ export default function StrategyPage({ onOpenChart, onNavigate }) {
     const stock = target || backtestStockTarget;
     if (!stock) return;
 
+    const code = stock.stockCode || stock.code;
+    if (!code) return;
+
     const { startDate, endDate } = computeDateRange(rangeType);
     setBacktesting(true);
 
     try {
       const res = await backtestStock({
-        stockCode: stock.stockCode,
+        stockCode: code,
         strategyFileNames: selectedStrategyFiles,
         logicMode,
         minScorePercent,
@@ -138,6 +139,7 @@ export default function StrategyPage({ onOpenChart, onNavigate }) {
       });
       setBacktestResult(res);
     } catch (err) {
+      console.error('Backtest error', err);
       toast.error(err.message || '回測執行失敗');
     } finally {
       setBacktesting(false);
@@ -1283,7 +1285,7 @@ export default function StrategyPage({ onOpenChart, onNavigate }) {
       <Modal
         isOpen={showBacktestModal}
         onClose={() => setShowBacktestModal(false)}
-        title={`個股策略區間獲利回測: ${backtestStockTarget?.stockCode || ''} ${backtestStockTarget?.stockName || ''}`}
+        title={`個股策略區間獲利回測: ${backtestStockTarget?.stockCode || backtestStockTarget?.code || ''} ${backtestStockTarget?.stockName || backtestStockTarget?.name || ''}`}
         subtitle="評估當前策略組合在指定時間區間內的累積獲利率、勝率與逐筆交易歷程"
         maxWidth="max-w-4xl"
       >
@@ -1371,113 +1373,144 @@ export default function StrategyPage({ onOpenChart, onNavigate }) {
             </div>
           )}
 
-          {/* Results Display */}
-          {!backtesting && backtestResult && (
-            <div className="space-y-4">
-              {/* Metrics Grid */}
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700">
-                  <div className="text-[11px] text-slate-500 dark:text-slate-400">總累積報酬率</div>
-                  <div
-                    className={`text-lg font-mono font-bold mt-0.5 ${
-                      backtestResult.totalReturn >= 0 ? 'text-rose-500' : 'text-emerald-500'
-                    }`}
-                  >
-                    {fmtPercent(backtestResult.totalReturn * 100)}
-                  </div>
-                </div>
-
-                <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700">
-                  <div className="text-[11px] text-slate-500 dark:text-slate-400">年化報酬率</div>
-                  <div
-                    className={`text-lg font-mono font-bold mt-0.5 ${
-                      backtestResult.annualizedReturn >= 0 ? 'text-rose-500' : 'text-emerald-500'
-                    }`}
-                  >
-                    {fmtPercent(backtestResult.annualizedReturn * 100)}
-                  </div>
-                </div>
-
-                <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700">
-                  <div className="text-[11px] text-slate-500 dark:text-slate-400">勝率 / 交易次數</div>
-                  <div className="text-lg font-mono font-bold mt-0.5 text-slate-900 dark:text-slate-100">
-                    {fmtPercent(backtestResult.winRate * 100)}
-                    <span className="text-xs font-normal text-slate-400 ml-1.5">
-                      ({backtestResult.totalTrades}次)
-                    </span>
-                  </div>
-                </div>
-
-                <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700">
-                  <div className="text-[11px] text-slate-500 dark:text-slate-400">最大回撤 / 夏普比率</div>
-                  <div className="text-lg font-mono font-bold mt-0.5 text-slate-900 dark:text-slate-100">
-                    <span className="text-rose-500">
-                      -{fmtPercent(backtestResult.maxDrawdown * 100)}
-                    </span>
-                    <span className="text-xs font-normal text-slate-400 ml-1.5">
-                      (SR: {backtestResult.sharpeRatio?.toFixed(2) || '0.00'})
-                    </span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Trades Table */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <div className="text-xs font-bold text-slate-900 dark:text-slate-100">
-                    歷史交易進出場歷程 ({backtestResult.trades?.length || 0} 筆)
-                  </div>
-                  <div className="text-[11px] text-slate-400">
-                    期初本金: {fmtCurrency(backtestResult.initialCapital)} ➔ 期末資產: {fmtCurrency(backtestResult.finalCapital)}
-                  </div>
-                </div>
-
-                <div className="max-h-60 overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-700">
-                  <table className="w-full text-left border-collapse text-xs">
-                    <thead className="sticky top-0 bg-slate-100 dark:bg-slate-800 text-[11px] text-slate-500 dark:text-slate-400 font-semibold border-b border-slate-200 dark:border-slate-700">
-                      <tr>
-                        <th className="py-2 px-3">買進日期</th>
-                        <th className="py-2 px-3">買進價格</th>
-                        <th className="py-2 px-3">賣出日期</th>
-                        <th className="py-2 px-3">賣出價格</th>
-                        <th className="py-2 px-3">持有天數</th>
-                        <th className="py-2 px-3 text-right">單筆獲利</th>
-                        <th className="py-2 px-3 text-right">報酬率</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                      {backtestResult.trades && backtestResult.trades.length > 0 ? (
-                        backtestResult.trades.map((t, idx) => {
-                          const isProfit = t.profitLoss >= 0;
-                          return (
-                            <tr key={idx} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 font-mono">
-                              <td className="py-2 px-3 text-slate-600 dark:text-slate-300">{t.buyDate}</td>
-                              <td className="py-2 px-3">{fmtCurrency(t.buyPrice, 2)}</td>
-                              <td className="py-2 px-3 text-slate-600 dark:text-slate-300">{t.sellDate || '尚未出場'}</td>
-                              <td className="py-2 px-3">{t.sellPrice ? fmtCurrency(t.sellPrice, 2) : '-'}</td>
-                              <td className="py-2 px-3 text-slate-500">{t.days} 天</td>
-                              <td className={`py-2 px-3 text-right font-bold ${isProfit ? 'text-rose-500' : 'text-emerald-500'}`}>
-                                {fmtCurrency(t.profitLoss)}
-                              </td>
-                              <td className={`py-2 px-3 text-right font-bold ${isProfit ? 'text-rose-500' : 'text-emerald-500'}`}>
-                                {fmtPercent(t.return * 100)}
-                              </td>
-                            </tr>
-                          );
-                        })
-                      ) : (
-                        <tr>
-                          <td colSpan={7} className="py-8 text-center text-slate-400 text-xs">
-                            此時間區間內未觸發任何完整進出場交易（可嘗試切換更長期間或調整為 OR 邏輯模式）
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+          {/* Empty / Initial State */}
+          {!backtesting && !backtestResult && (
+            <div className="py-12 flex flex-col items-center justify-center text-slate-400 text-xs">
+              尚未取得回測運算結果，請點選上方「重新運算」或切換時間區間。
             </div>
           )}
+
+          {/* Results Display */}
+          {!backtesting && backtestResult && (() => {
+            const totalReturn = Number(backtestResult.totalReturn ?? backtestResult.TotalReturn ?? 0);
+            const annualizedReturn = Number(backtestResult.annualizedReturn ?? backtestResult.AnnualizedReturn ?? 0);
+            const winRate = Number(backtestResult.winRate ?? backtestResult.WinRate ?? 0);
+            const totalTrades = Number(backtestResult.totalTrades ?? backtestResult.TotalTrades ?? 0);
+            const maxDrawdown = Number(backtestResult.maxDrawdown ?? backtestResult.MaxDrawdown ?? 0);
+            const sharpeRatio = Number(backtestResult.sharpeRatio ?? backtestResult.SharpeRatio ?? 0);
+            const initialCapital = Number(backtestResult.initialCapital ?? backtestResult.InitialCapital ?? 0);
+            const finalCapital = Number(backtestResult.finalCapital ?? backtestResult.FinalCapital ?? 0);
+            const tradesList = Array.isArray(backtestResult.trades)
+              ? backtestResult.trades
+              : Array.isArray(backtestResult.Trades)
+              ? backtestResult.Trades
+              : [];
+
+            return (
+              <div className="space-y-4">
+                {/* Metrics Grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700">
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400">總累積報酬率</div>
+                    <div
+                      className={`text-lg font-mono font-bold mt-0.5 ${
+                        totalReturn >= 0 ? 'text-rose-500' : 'text-emerald-500'
+                      }`}
+                    >
+                      {fmtPercent(totalReturn * 100)}
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700">
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400">年化報酬率</div>
+                    <div
+                      className={`text-lg font-mono font-bold mt-0.5 ${
+                        annualizedReturn >= 0 ? 'text-rose-500' : 'text-emerald-500'
+                      }`}
+                    >
+                      {fmtPercent(annualizedReturn * 100)}
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700">
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400">勝率 / 交易次數</div>
+                    <div className="text-lg font-mono font-bold mt-0.5 text-slate-900 dark:text-slate-100">
+                      {fmtPercent(winRate * 100)}
+                      <span className="text-xs font-normal text-slate-400 ml-1.5">
+                        ({totalTrades}次)
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700">
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400">最大回撤 / 夏普比率</div>
+                    <div className="text-lg font-mono font-bold mt-0.5 text-slate-900 dark:text-slate-100">
+                      <span className="text-rose-500">
+                        -{fmtPercent(maxDrawdown * 100)}
+                      </span>
+                      <span className="text-xs font-normal text-slate-400 ml-1.5">
+                        (SR: {isNaN(sharpeRatio) ? '0.00' : sharpeRatio.toFixed(2)})
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Trades Table */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                      歷史交易進出場歷程 ({tradesList.length} 筆)
+                    </div>
+                    <div className="text-[11px] text-slate-400">
+                      期初本金: {fmtCurrency(initialCapital)} ➔ 期末資產: {fmtCurrency(finalCapital)}
+                    </div>
+                  </div>
+
+                  <div className="max-h-60 overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-700">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead className="sticky top-0 bg-slate-100 dark:bg-slate-800 text-[11px] text-slate-500 dark:text-slate-400 font-semibold border-b border-slate-200 dark:border-slate-700">
+                        <tr>
+                          <th className="py-2 px-3">買進日期</th>
+                          <th className="py-2 px-3">買進價格</th>
+                          <th className="py-2 px-3">賣出日期</th>
+                          <th className="py-2 px-3">賣出價格</th>
+                          <th className="py-2 px-3">持有天數</th>
+                          <th className="py-2 px-3 text-right">單筆獲利</th>
+                          <th className="py-2 px-3 text-right">報酬率</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                        {tradesList.length > 0 ? (
+                          tradesList.map((t, idx) => {
+                            const buyDate = t.buyDate ?? t.BuyDate ?? '-';
+                            const buyPrice = Number(t.buyPrice ?? t.BuyPrice ?? 0);
+                            const sellDate = t.sellDate ?? t.SellDate;
+                            const sellPrice = t.sellPrice ?? t.SellPrice;
+                            const days = t.days ?? t.Days ?? 0;
+                            const profitLoss = Number(t.profitLoss ?? t.ProfitLoss ?? 0);
+                            const returnRate = Number(t.return ?? t.Return ?? t.returnRate ?? t.ReturnRate ?? 0);
+                            const isProfit = profitLoss >= 0;
+
+                            return (
+                              <tr key={idx} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 font-mono">
+                                <td className="py-2 px-3 text-slate-600 dark:text-slate-300">{buyDate}</td>
+                                <td className="py-2 px-3">{fmtCurrency(buyPrice, 2)}</td>
+                                <td className="py-2 px-3 text-slate-600 dark:text-slate-300">{sellDate || '尚未出場'}</td>
+                                <td className="py-2 px-3">{sellPrice ? fmtCurrency(sellPrice, 2) : '-'}</td>
+                                <td className="py-2 px-3 text-slate-500">{days} 天</td>
+                                <td className={`py-2 px-3 text-right font-bold ${isProfit ? 'text-rose-500' : 'text-emerald-500'}`}>
+                                  {fmtCurrency(profitLoss)}
+                                </td>
+                                <td className={`py-2 px-3 text-right font-bold ${isProfit ? 'text-rose-500' : 'text-emerald-500'}`}>
+                                  {fmtPercent(returnRate * 100)}
+                                </td>
+                              </tr>
+                            );
+                          })
+                        ) : (
+                          <tr>
+                            <td colSpan={7} className="py-8 text-center text-slate-400 text-xs">
+                              此時間區間內未觸發任何完整進出場交易（可嘗試切換更長期間或調整為 OR 邏輯模式）
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
         </div>
       </Modal>
     </div>

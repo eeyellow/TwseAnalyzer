@@ -686,32 +686,33 @@ public class AnalysisController : ControllerBase
 
         return Ok(new
         {
-            StockCode = stockCode,
-            StockName = stockInfo?.Name ?? stockCode,
-            Industry = stockInfo?.Industry ?? "",
-            InitialCapital = result.InitialCapital,
-            FinalCapital = result.FinalCapital,
-            TotalReturn = result.TotalReturn,
-            AnnualizedReturn = result.AnnualizedReturn,
-            WinRate = result.WinRate,
-            TotalTrades = result.TotalTrades,
-            MaxDrawdown = result.MaxDrawdown,
-            SharpeRatio = result.SharpeRatio,
-            Trades = result.Trades.Select(t => new
+            stockCode = stockCode,
+            stockName = stockInfo?.Name ?? stockCode,
+            industry = stockInfo?.Industry ?? "",
+            initialCapital = result.InitialCapital,
+            finalCapital = result.FinalCapital,
+            totalReturn = result.TotalReturn,
+            annualizedReturn = result.AnnualizedReturn,
+            winRate = result.WinRate,
+            totalTrades = result.TotalTrades,
+            maxDrawdown = result.MaxDrawdown,
+            sharpeRatio = result.SharpeRatio,
+            trades = result.Trades.Select(t => new
             {
-                BuyDate = t.BuyDate.ToString("yyyy-MM-dd"),
-                BuyPrice = t.BuyPrice,
-                SellDate = t.SellDate?.ToString("yyyy-MM-dd") ?? "",
-                SellPrice = t.SellPrice ?? 0m,
-                Quantity = t.Quantity,
-                Return = t.ReturnRate ?? 0m,
-                ProfitLoss = t.Profit ?? 0m,
-                Days = t.HoldDays ?? 0
-            }),
-            StrategiesUsed = loadedNames,
-            LogicMode = logicMode,
-            StartDate = backtestParams.StartDate,
-            EndDate = backtestParams.EndDate
+                buyDate = t.BuyDate.ToString("yyyy-MM-dd"),
+                buyPrice = t.BuyPrice,
+                sellDate = t.SellDate?.ToString("yyyy-MM-dd") ?? "",
+                sellPrice = t.SellPrice ?? 0m,
+                quantity = t.Quantity,
+                @return = t.ReturnRate ?? 0m,
+                returnRate = t.ReturnRate ?? 0m,
+                profitLoss = t.Profit ?? 0m,
+                days = t.HoldDays ?? 0
+            }).ToList(),
+            strategiesUsed = loadedNames,
+            logicMode = logicMode,
+            startDate = backtestParams.StartDate,
+            endDate = backtestParams.EndDate
         });
     }
 }

@@ -38,10 +38,10 @@ export default function Modal({
         aria-hidden="true"
       />
       <div
-        className={`relative w-full ${maxWidth} rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#111827] shadow-2xl overflow-hidden z-10 ${className}`}
+        className={`relative w-full ${maxWidth} max-h-[90vh] flex flex-col rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-[#111827] shadow-2xl overflow-hidden z-10 ${className}`}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800">
+        <div className="shrink-0 flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-800">
           <div>
             {title && (
               <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
@@ -61,7 +61,7 @@ export default function Modal({
             <X className="w-5 h-5" />
           </button>
         </div>
-        <div className="p-6">{children}</div>
+        <div className="p-6 overflow-y-auto flex-1">{children}</div>
       </div>
     </div>
   );
