@@ -1,31 +1,33 @@
 {
-    "screen": [
-        "SMA(3) greater_than SMA(3)[1]",
-        "SMA(18) greater_than SMA(18)[1]",
-        "Volume greater_than Volume[1]",
-        "Volume greater_than Volume[2]",
-        "Volume greater_than Volume[3]",
-        "Close greater_than Open"
-    ],
-    "backtest": {
-        "startDate": "2023-01-01",
-        "endDate": "2024-12-31",
-        "initialCapital": 100000,
-        "positionSize": 100000,
-        "commissionRate": 0.001425,
-        "taxRate": 0.003
-    },
-    "entry": [
-        "SMA(3) greater_than SMA(3)[1]",
-        "SMA(18) greater_than SMA(18)[1]",
-        "Volume greater_than Volume[1]",
-        "Volume greater_than Volume[2]",
-        "Volume greater_than Volume[3]",
-        "Close greater_than Open"
-    ],
-    "exit": [
-        "SMA(3) less_than SMA(3)[1]"
-    ],
-    "sortBy": "Volume",
-    "limit": 50
+  "name": "均線多頭翻揚策略 (MA Turnaround)",
+  "description": "3日與18日均線同步翻揚向上，連續三日放量收紅K進場，3日線下彎時出場。",
+  "screen": [
+    "SMA(3) greater_than SMA(3)[1]",
+    "SMA(18) greater_than SMA(18)[1]",
+    "Volume greater_than Volume[1]",
+    "Volume greater_than Volume[2]",
+    "Volume greater_than Volume[3]",
+    "Close greater_than Open"
+  ],
+  "entry": [
+    "SMA(3) greater_than SMA(3)[1]",
+    "SMA(18) greater_than SMA(18)[1]",
+    "Volume greater_than Volume[1]",
+    "Volume greater_than Volume[2]",
+    "Volume greater_than Volume[3]",
+    "Close greater_than Open"
+  ],
+  "exit": [
+    "SMA(3) less_than SMA(3)[1]"
+  ],
+  "backtest": {
+    "startDate": "2023-01-01",
+    "endDate": null,
+    "initialCapital": 1000000,
+    "positionSize": 1000000,
+    "commissionRate": 0.001425,
+    "taxRate": 0.003
+  },
+  "sortBy": "Volume",
+  "limit": 50
 }

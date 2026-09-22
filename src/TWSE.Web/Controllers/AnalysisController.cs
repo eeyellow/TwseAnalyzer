@@ -15,11 +15,13 @@ public class AnalysisController : ControllerBase
 {
     private readonly IStockRepository _repo;
     private readonly IConditionEvaluator _evaluator;
+    private readonly IBacktestEngine _backtestEngine;
 
-    public AnalysisController(IStockRepository repo, IConditionEvaluator evaluator)
+    public AnalysisController(IStockRepository repo, IConditionEvaluator evaluator, IBacktestEngine backtestEngine)
     {
         _repo = repo;
         _evaluator = evaluator;
+        _backtestEngine = backtestEngine;
     }
 
     public static string GetStrategiesDirectory()
@@ -605,6 +607,124 @@ public class AnalysisController : ControllerBase
 
         return Ok(results);
     }
+
+    [HttpPost("backtest-stock")]
+    public async Task<IActionResult> BacktestStock([FromBody] StockBacktestRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.StockCode))
+            return BadRequest("請提供有效的股票代號。");
+
+        var stockCode = request.StockCode.Trim();
+        var history = await _repo.GetDailyPricesAsync(stockCode);
+        if (history == null || history.Count < 20)
+            return BadRequest($"標的 '{stockCode}' 歷史日線數據不足，無法進行回測。");
+
+        var strategiesDir = GetStrategiesDirectory();
+        if (!Directory.Exists(strategiesDir))
+            return BadRequest("找不到策略目錄。");
+
+        var filesToLoad = (request.StrategyFileNames != null && request.StrategyFileNames.Any())
+            ? request.StrategyFileNames
+            : Directory.GetFiles(strategiesDir, "*.json").Select(Path.GetFileName).ToList()!;
+
+        var loadedConfigs = new List<StrategyConfig>();
+        var loadedNames = new List<string>();
+
+        foreach (var rawName in filesToLoad)
+        {
+            if (string.IsNullOrWhiteSpace(rawName)) continue;
+            var safeFile = Path.GetFileName(rawName);
+            var filePath = Path.Combine(strategiesDir, safeFile);
+            if (!System.IO.File.Exists(filePath)) continue;
+
+            try
+            {
+                var json = await System.IO.File.ReadAllTextAsync(filePath);
+                var cfg = JsonSerializer.Deserialize<StrategyConfig>(json);
+                if (cfg != null)
+                {
+                    var baseName = Path.GetFileNameWithoutExtension(safeFile);
+                    string displayName = baseName;
+                    using var doc = JsonDocument.Parse(json);
+                    if (doc.RootElement.TryGetProperty("name", out var nProp) && !string.IsNullOrWhiteSpace(nProp.GetString()))
+                    {
+                        displayName = nProp.GetString()!;
+                    }
+                    loadedNames.Add(displayName);
+                    loadedConfigs.Add(cfg);
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[TWSE.Web] Error loading strategy '{safeFile}': {ex.Message}");
+            }
+        }
+
+        if (!loadedConfigs.Any())
+        {
+            return BadRequest("未找到指定的策略配置檔案。");
+        }
+
+        var capital = request.InitialCapital > 0 ? request.InitialCapital : 1000000m;
+        var backtestParams = new BacktestParams
+        {
+            StartDate = string.IsNullOrWhiteSpace(request.StartDate) ? null : request.StartDate.Trim(),
+            EndDate = string.IsNullOrWhiteSpace(request.EndDate) ? null : request.EndDate.Trim(),
+            InitialCapital = capital,
+            PositionSize = capital,
+            CommissionRate = 0.001425m,
+            TaxRate = 0.003m
+        };
+
+        var logicMode = string.IsNullOrWhiteSpace(request.LogicMode) ? "AND" : request.LogicMode;
+        var minScore = request.MinScorePercent > 0 ? request.MinScorePercent : 66.0;
+
+        var result = await _backtestEngine.RunComboAsync(stockCode, loadedConfigs, logicMode, minScore, backtestParams, history);
+
+        var allStocks = await _repo.GetAllStocksAsync();
+        var stockInfo = allStocks.FirstOrDefault(s => s.Code.Equals(stockCode, StringComparison.OrdinalIgnoreCase));
+
+        return Ok(new
+        {
+            StockCode = stockCode,
+            StockName = stockInfo?.Name ?? stockCode,
+            Industry = stockInfo?.Industry ?? "",
+            InitialCapital = result.InitialCapital,
+            FinalCapital = result.FinalCapital,
+            TotalReturn = result.TotalReturn,
+            AnnualizedReturn = result.AnnualizedReturn,
+            WinRate = result.WinRate,
+            TotalTrades = result.TotalTrades,
+            MaxDrawdown = result.MaxDrawdown,
+            SharpeRatio = result.SharpeRatio,
+            Trades = result.Trades.Select(t => new
+            {
+                BuyDate = t.BuyDate.ToString("yyyy-MM-dd"),
+                BuyPrice = t.BuyPrice,
+                SellDate = t.SellDate?.ToString("yyyy-MM-dd") ?? "",
+                SellPrice = t.SellPrice ?? 0m,
+                Quantity = t.Quantity,
+                Return = t.ReturnRate ?? 0m,
+                ProfitLoss = t.Profit ?? 0m,
+                Days = t.HoldDays ?? 0
+            }),
+            StrategiesUsed = loadedNames,
+            LogicMode = logicMode,
+            StartDate = backtestParams.StartDate,
+            EndDate = backtestParams.EndDate
+        });
+    }
+}
+
+public class StockBacktestRequest
+{
+    public string StockCode { get; set; } = string.Empty;
+    public List<string> StrategyFileNames { get; set; } = new();
+    public string? LogicMode { get; set; } = "AND";
+    public double MinScorePercent { get; set; } = 66.0;
+    public string? StartDate { get; set; }
+    public string? EndDate { get; set; }
+    public decimal InitialCapital { get; set; } = 1000000;
 }
 
 public class ScanRequest

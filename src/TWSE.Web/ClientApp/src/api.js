@@ -177,3 +177,17 @@ export async function cancelSimulation() {
   return res.json();
 }
 
+// --- Stock Interval Backtest ---
+export async function backtestStock(payload) {
+  const res = await fetch(`${API_BASE}/analysis/backtest-stock`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw new Error(errorText || '回測執行失敗');
+  }
+  return res.json();
+}
+

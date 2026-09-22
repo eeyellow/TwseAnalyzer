@@ -1,8 +1,25 @@
 {
-    "screen": [
-        "RSI(14) less_than 30",
-        "Close greater_than Open"
-    ],
-    "sortBy": "RSI(14)",
-    "limit": 20
+  "name": "RSI超跌反彈策略 (RSI Oversold Bounce)",
+  "description": "RSI(14)低於30超賣區出現紅K反彈時進場，待RSI回升站上50中軸時獲利出場。",
+  "screen": [
+    "RSI(14) less_than 30",
+    "Close greater_than Open"
+  ],
+  "entry": [
+    "RSI(14) less_than 30",
+    "Close greater_than Open"
+  ],
+  "exit": [
+    "RSI(14) greater_than 50"
+  ],
+  "backtest": {
+    "startDate": "2023-01-01",
+    "endDate": null,
+    "initialCapital": 1000000,
+    "positionSize": 1000000,
+    "commissionRate": 0.001425,
+    "taxRate": 0.003
+  },
+  "sortBy": "RSI(14)",
+  "limit": 20
 }

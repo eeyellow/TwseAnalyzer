@@ -1,14 +1,23 @@
 {
-    "backtest": {
-        "initialCapital": 1000000,
-        "positionSize": 100000,
-        "commissionRate": 0.001425,
-        "taxRate": 0.003
-    },
-    "entry": [
-        "SMA(5) cross_above SMA(20)"
-    ],
-    "exit": [
-        "SMA(5) cross_below SMA(20)"
-    ]
+  "name": "單純均線黃金交叉 (Simple MA Golden Cross)",
+  "description": "經典雙均線策略：5日線向上突破20日線進場，跌破20日線離場。",
+  "screen": [
+    "SMA(5) cross_above SMA(20)"
+  ],
+  "entry": [
+    "SMA(5) cross_above SMA(20)"
+  ],
+  "exit": [
+    "SMA(5) cross_below SMA(20)"
+  ],
+  "backtest": {
+    "startDate": "2023-01-01",
+    "endDate": null,
+    "initialCapital": 1000000,
+    "positionSize": 1000000,
+    "commissionRate": 0.001425,
+    "taxRate": 0.003
+  },
+  "sortBy": "Volume",
+  "limit": 50
 }

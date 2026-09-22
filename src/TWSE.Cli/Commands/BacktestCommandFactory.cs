@@ -25,13 +25,17 @@ public class BacktestCommandFactory
         var stockOption = new Option<string>("--stock", "Specific stock code to backtest on.");
         var allOption = new Option<bool>("--all", "Backtest on all listed stocks.");
         var topOption = new Option<int>("--top", () => 20, "Number of top results to show when backtesting all stocks.");
+        var startOption = new Option<string?>("--start", "回測起始日期 (YYYY-MM-DD，預設依策略配置)");
+        var endOption = new Option<string?>("--end", "回測結束日期 (YYYY-MM-DD，留空則自動跑至最新交易日)");
 
         command.AddOption(strategyOption);
         command.AddOption(stockOption);
         command.AddOption(allOption);
         command.AddOption(topOption);
+        command.AddOption(startOption);
+        command.AddOption(endOption);
 
-        command.SetHandler(async (string[] strategyFiles, string? stockOptionValue, bool allOptionValue, int topOptionValue) =>
+        command.SetHandler(async (string[] strategyFiles, string? stockOptionValue, bool allOptionValue, int topOptionValue, string? startOptionValue, string? endOptionValue) =>
         {
             var aggregatedConfig = new StrategyConfig();
             bool isFirstValidConfig = true;
@@ -67,6 +71,15 @@ public class BacktestCommandFactory
             {
                 AnsiConsole.MarkupLine($"[red]No valid strategy files found.[/]");
                 return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(startOptionValue))
+            {
+                aggregatedConfig.Backtest.StartDate = startOptionValue;
+            }
+            if (!string.IsNullOrWhiteSpace(endOptionValue))
+            {
+                aggregatedConfig.Backtest.EndDate = endOptionValue;
             }
 
             var engine = _serviceProvider.GetRequiredService<IBacktestEngine>();
@@ -147,7 +160,7 @@ public class BacktestCommandFactory
                 }
                 AnsiConsole.Write(table);
             }
-        }, strategyOption, stockOption, allOption, topOption);
+        }, strategyOption, stockOption, allOption, topOption, startOption, endOption);
 
         return command;
     }

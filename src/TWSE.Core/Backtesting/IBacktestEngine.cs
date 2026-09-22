@@ -5,5 +5,6 @@ namespace TWSE.Core.Backtesting;
 public interface IBacktestEngine
 {
     Task<BacktestResult> RunAsync(string stockCode, StrategyConfig config, IReadOnlyList<OHLCV> history);
+    Task<BacktestResult> RunComboAsync(string stockCode, List<StrategyConfig> configs, string logicMode, double minScorePercent, BacktestParams backtestParams, IReadOnlyList<OHLCV> history);
     Task<List<BacktestResult>> ScanAllAsync(StrategyConfig config, Dictionary<string, IReadOnlyList<OHLCV>> allHistories);
 }

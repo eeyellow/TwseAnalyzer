@@ -1,28 +1,30 @@
 {
-    "screen": [
-        "K(45) greater_than D(45)",
-        "D(45) greater_than 30",
-        "SMA(25) cross_above SMA(50)",
-        "Close greater_than SMA(25)"
-    ],
-    "backtest": {
-        "startDate": "2023-01-01",
-        "endDate": "2024-12-31",
-        "initialCapital": 100000,
-        "positionSize": 100000,
-        "commissionRate": 0.001425,
-        "taxRate": 0.003
-    },
-    "entry": [
-        "K(45) greater_than D(45)",
-        "D(45) greater_than 30",
-        "SMA(25) cross_above SMA(50)",
-        "Close greater_than SMA(25)"
-    ],
-    "exit": [
-        "K(45) cross_below D(45)",
-        "Close less_than SMA(25)"
-    ],
-    "sortBy": "Volume",
-    "limit": 50
+  "name": "週線波段趨勢策略 (Weekly Trend Follow)",
+  "description": "長週期K(45)大於D(45)且大於30，25日短均線突破50日均線且收盤價站穩短均線。",
+  "screen": [
+    "K(45) greater_than D(45)",
+    "D(45) greater_than 30",
+    "SMA(25) cross_above SMA(50)",
+    "Close greater_than SMA(25)"
+  ],
+  "entry": [
+    "K(45) greater_than D(45)",
+    "D(45) greater_than 30",
+    "SMA(25) cross_above SMA(50)",
+    "Close greater_than SMA(25)"
+  ],
+  "exit": [
+    "K(45) cross_below D(45)",
+    "Close less_than SMA(25)"
+  ],
+  "backtest": {
+    "startDate": "2023-01-01",
+    "endDate": null,
+    "initialCapital": 1000000,
+    "positionSize": 1000000,
+    "commissionRate": 0.001425,
+    "taxRate": 0.003
+  },
+  "sortBy": "Volume",
+  "limit": 50
 }

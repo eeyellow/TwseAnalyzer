@@ -106,4 +106,34 @@ public class BacktestEngineTests
         Assert.NotNull(result);
         Assert.True(result.Trades.All(t => t.BuyDate >= data[50].Date));
     }
+
+    [Fact]
+    public async Task RunComboAsync_ShouldEvaluateMultiStrategyComboCorrectly()
+    {
+        var data = GenerateTestData(80);
+        var configA = new StrategyConfig
+        {
+            Entry = new List<string> { "Close greater_than 90" },
+            Exit = new List<string> { "Close greater_than 200" }
+        };
+        var configB = new StrategyConfig
+        {
+            Entry = new List<string> { "Close greater_than 1000" }, // Impossible condition
+            Exit = new List<string> { "Close greater_than 200" }
+        };
+
+        var backtestParams = new BacktestParams
+        {
+            InitialCapital = 1000000,
+            PositionSize = 1000000
+        };
+
+        // In AND mode: configA and configB must both match. Since configB impossible, 0 trades.
+        var resultAnd = await _engine.RunComboAsync("2330", new List<StrategyConfig> { configA, configB }, "AND", 100, backtestParams, data);
+        Assert.Equal(0, resultAnd.TotalTrades);
+
+        // In OR mode: either configA or configB matches. Since configA matches, trades occur.
+        var resultOr = await _engine.RunComboAsync("2330", new List<StrategyConfig> { configA, configB }, "OR", 50, backtestParams, data);
+        Assert.True(resultOr.TotalTrades > 0);
+    }
 }

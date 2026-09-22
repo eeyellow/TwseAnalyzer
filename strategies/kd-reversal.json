@@ -1,27 +1,29 @@
 {
-    "screen": [
-        "K(9) less_than 20",
-        "D(9) less_than 20",
-        "K(9) cross_above D(9)"
-    ],
-    "backtest": {
-        "startDate": "2023-01-01",
-        "endDate": "2024-12-31",
-        "initialCapital": 100000,
-        "positionSize": 100000,
-        "commissionRate": 0.001425,
-        "taxRate": 0.003
-    },
-    "entry": [
-        "K(9) less_than 20",
-        "D(9) less_than 20",
-        "K(9) cross_above D(9)"
-    ],
-    "exit": [
-        "K(9) greater_than 80",
-        "D(9) greater_than 80",
-        "K(9) cross_below D(9)"
-    ],
-    "sortBy": "Volume",
-    "limit": 50
+  "name": "KD極端超賣強勢反轉 (KD Extreme Oversold Reversal)",
+  "description": "KD指標於20極端超賣區形成黃金交叉進場，高檔80雙死亡交叉出場。",
+  "screen": [
+    "K(9) less_than 20",
+    "D(9) less_than 20",
+    "K(9) cross_above D(9)"
+  ],
+  "entry": [
+    "K(9) less_than 20",
+    "D(9) less_than 20",
+    "K(9) cross_above D(9)"
+  ],
+  "exit": [
+    "K(9) greater_than 80",
+    "D(9) greater_than 80",
+    "K(9) cross_below D(9)"
+  ],
+  "backtest": {
+    "startDate": "2023-01-01",
+    "endDate": null,
+    "initialCapital": 1000000,
+    "positionSize": 1000000,
+    "commissionRate": 0.001425,
+    "taxRate": 0.003
+  },
+  "sortBy": "Volume",
+  "limit": 50
 }

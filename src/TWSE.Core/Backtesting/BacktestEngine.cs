@@ -14,17 +14,28 @@ public class BacktestEngine : IBacktestEngine
 
     public Task<BacktestResult> RunAsync(string stockCode, StrategyConfig config, IReadOnlyList<OHLCV> history)
     {
+        return RunComboAsync(stockCode, new List<StrategyConfig> { config }, "AND", 100, config.Backtest, history);
+    }
+
+    public Task<BacktestResult> RunComboAsync(
+        string stockCode,
+        List<StrategyConfig> configs,
+        string logicMode,
+        double minScorePercent,
+        BacktestParams backtestParams,
+        IReadOnlyList<OHLCV> history)
+    {
         var result = new BacktestResult
         {
             StockCode = stockCode,
-            InitialCapital = config.Backtest.InitialCapital,
-            FinalCapital = config.Backtest.InitialCapital
+            InitialCapital = backtestParams.InitialCapital,
+            FinalCapital = backtestParams.InitialCapital
         };
 
-        if (history.Count < 2) return Task.FromResult(result);
+        if (history.Count < 2 || configs == null || !configs.Any()) return Task.FromResult(result);
 
-        DateTime? startDate = DateTime.TryParse(config.Backtest.StartDate, out var sd) ? sd.Date : null;
-        DateTime? endDate = DateTime.TryParse(config.Backtest.EndDate, out var ed) ? ed.Date : null;
+        DateTime? startDate = DateTime.TryParse(backtestParams.StartDate, out var sd) ? sd.Date : null;
+        DateTime? endDate = DateTime.TryParse(backtestParams.EndDate, out var ed) ? ed.Date : null;
 
         // Find the index where evaluation starts (preserving previous data for indicator warmup)
         int startIndex = 0;
@@ -92,14 +103,41 @@ public class BacktestEngine : IBacktestEngine
 
                 if (openTrade == null)
                 {
-                    // Check entry conditions on complete history
-                    if (_evaluator.EvaluateAll(config.Entry, history, i))
+                    // Multi-strategy entry condition evaluation
+                    int matchedEntries = 0;
+                    foreach (var cfg in configs)
+                    {
+                        var entryList = (cfg.Entry != null && cfg.Entry.Any())
+                            ? cfg.Entry
+                            : (cfg.Screen ?? new List<string>());
+
+                        if (entryList.Any() && _evaluator.EvaluateAll(entryList, history, i))
+                        {
+                            matchedEntries++;
+                        }
+                    }
+
+                    double score = (double)matchedEntries / configs.Count * 100.0;
+                    bool isBuy = logicMode.ToUpperInvariant() switch
+                    {
+                        "AND" => matchedEntries == configs.Count,
+                        "OR" => matchedEntries > 0,
+                        "SCORE" => score >= minScorePercent,
+                        _ => matchedEntries == configs.Count
+                    };
+
+                    if (isBuy)
                     {
                         decimal price = nextDay.Open;
                         if (price > 0)
                         {
-                            int maxShares = (int)(config.Backtest.PositionSize / price);
+                            int maxShares = (int)(backtestParams.PositionSize / price);
                             int quantity = (maxShares / 1000) * 1000;
+
+                            if (quantity == 0 && cash >= price * 1000 && backtestParams.PositionSize >= price)
+                            {
+                                quantity = 1000; // Allow at least 1 unit if funds permit
+                            }
 
                             if (quantity > 0 && cash >= quantity * price)
                             {
@@ -109,8 +147,8 @@ public class BacktestEngine : IBacktestEngine
                                     BuyDate = nextDay.Date,
                                     BuyPrice = price,
                                     Quantity = quantity,
-                                    CommissionRate = config.Backtest.CommissionRate,
-                                    TaxRate = config.Backtest.TaxRate
+                                    CommissionRate = backtestParams.CommissionRate,
+                                    TaxRate = backtestParams.TaxRate
                                 };
                                 cash -= openTrade.TotalCost;
                             }
@@ -119,8 +157,10 @@ public class BacktestEngine : IBacktestEngine
                 }
                 else
                 {
-                    // Check exit conditions on complete history
-                    if (_evaluator.EvaluateAll(config.Exit, history, i))
+                    // Multi-strategy exit condition evaluation (any strategy triggering exit exits trade)
+                    bool isSell = configs.Any(cfg => cfg.Exit != null && cfg.Exit.Any() && _evaluator.EvaluateAll(cfg.Exit, history, i));
+
+                    if (isSell)
                     {
                         decimal price = nextDay.Open;
                         if (price > 0)

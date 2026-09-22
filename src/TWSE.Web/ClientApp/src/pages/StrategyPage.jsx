@@ -9,6 +9,7 @@ import {
   getLocalTracking,
   saveLocalTracking,
   fetchStocks,
+  backtestStock,
 } from '../api';
 import {
   fmtCurrency,
@@ -45,6 +46,7 @@ import {
   RefreshCw,
   ShieldCheck,
   ShieldAlert,
+  TrendingUp,
 } from 'lucide-react';
 
 export default function StrategyPage({ onOpenChart, onNavigate }) {
@@ -83,6 +85,71 @@ export default function StrategyPage({ onOpenChart, onNavigate }) {
   const [newComboName, setNewComboName] = useState('');
   const [newComboDesc, setNewComboDesc] = useState('');
   const [savingCombo, setSavingCombo] = useState(false);
+
+  // Modal: Stock Interval Backtest
+  const [showBacktestModal, setShowBacktestModal] = useState(false);
+  const [backtestStockTarget, setBacktestStockTarget] = useState(null);
+  const [backtestRangeType, setBacktestRangeType] = useState('1Y'); // '1Y' | '2Y' | '3Y' | 'all' | 'custom'
+  const [customStartDate, setCustomStartDate] = useState('');
+  const [customEndDate, setCustomEndDate] = useState('');
+  const [backtesting, setBacktesting] = useState(false);
+  const [backtestResult, setBacktestResult] = useState(null);
+
+  const computeDateRange = (rangeType) => {
+    const now = new Date();
+    let startDate = null;
+    let endDate = null;
+
+    if (rangeType === '1Y') {
+      const d = new Date(now);
+      d.setFullYear(d.getFullYear() - 1);
+      startDate = d.toISOString().split('T')[0];
+    } else if (rangeType === '2Y') {
+      const d = new Date(now);
+      d.setFullYear(d.getFullYear() - 2);
+      startDate = d.toISOString().split('T')[0];
+    } else if (rangeType === '3Y') {
+      const d = new Date(now);
+      d.setFullYear(d.getFullYear() - 3);
+      startDate = d.toISOString().split('T')[0];
+    } else if (rangeType === 'custom') {
+      startDate = customStartDate || null;
+      endDate = customEndDate || null;
+    }
+    return { startDate, endDate };
+  };
+
+  const executeStockBacktest = async (target, rangeType = backtestRangeType) => {
+    const stock = target || backtestStockTarget;
+    if (!stock) return;
+
+    const { startDate, endDate } = computeDateRange(rangeType);
+    setBacktesting(true);
+
+    try {
+      const res = await backtestStock({
+        stockCode: stock.stockCode,
+        strategyFileNames: selectedStrategyFiles,
+        logicMode,
+        minScorePercent,
+        startDate,
+        endDate,
+        initialCapital: 1000000,
+      });
+      setBacktestResult(res);
+    } catch (err) {
+      toast.error(err.message || '回測執行失敗');
+    } finally {
+      setBacktesting(false);
+    }
+  };
+
+  const handleOpenBacktest = (item) => {
+    setBacktestStockTarget(item);
+    setShowBacktestModal(true);
+    setBacktestResult(null);
+    executeStockBacktest(item, backtestRangeType);
+  };
 
   // 1. Initial Data Loading
   const loadInitialData = useCallback(async () => {
@@ -1116,6 +1183,15 @@ export default function StrategyPage({ onOpenChart, onNavigate }) {
                           >
                             <BarChart3 className="w-3.5 h-3.5" />
                           </button>
+
+                          {/* Interval Backtest */}
+                          <button
+                            onClick={() => handleOpenBacktest(item)}
+                            className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-indigo-500 hover:border-indigo-500 transition-colors"
+                            title="回測此策略組合對該股的歷史區間獲利率"
+                          >
+                            <TrendingUp className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -1201,6 +1277,208 @@ export default function StrategyPage({ onOpenChart, onNavigate }) {
             </Button>
           </div>
         </form>
+      </Modal>
+
+      {/* Stock Interval Backtest Modal */}
+      <Modal
+        isOpen={showBacktestModal}
+        onClose={() => setShowBacktestModal(false)}
+        title={`個股策略區間獲利回測: ${backtestStockTarget?.stockCode || ''} ${backtestStockTarget?.stockName || ''}`}
+        subtitle="評估當前策略組合在指定時間區間內的累積獲利率、勝率與逐筆交易歷程"
+        maxWidth="max-w-4xl"
+      >
+        <div className="space-y-4">
+          {/* Top Config & Date Selector */}
+          <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-xs">
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="font-semibold text-slate-700 dark:text-slate-300">
+                回測區間：
+              </span>
+              {[
+                { id: '1Y', label: '近 1 年' },
+                { id: '2Y', label: '近 2 年' },
+                { id: '3Y', label: '近 3 年' },
+                { id: 'all', label: '全歷史' },
+                { id: 'custom', label: '自訂' },
+              ].map((btn) => (
+                <button
+                  key={btn.id}
+                  onClick={() => {
+                    setBacktestRangeType(btn.id);
+                    if (btn.id !== 'custom') {
+                      executeStockBacktest(backtestStockTarget, btn.id);
+                    }
+                  }}
+                  className={`px-2.5 py-1 rounded-lg font-medium transition-all ${
+                    backtestRangeType === btn.id
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600'
+                  }`}
+                >
+                  {btn.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Custom Range Inputs */}
+            {backtestRangeType === 'custom' && (
+              <div className="flex items-center gap-2">
+                <input
+                  type="date"
+                  value={customStartDate}
+                  onChange={(e) => setCustomStartDate(e.target.value)}
+                  className="px-2 py-1 rounded-lg bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-[11px]"
+                />
+                <span className="text-slate-400">至</span>
+                <input
+                  type="date"
+                  value={customEndDate}
+                  onChange={(e) => setCustomEndDate(e.target.value)}
+                  className="px-2 py-1 rounded-lg bg-white dark:bg-slate-700 border border-slate-200 dark:border-slate-600 text-[11px]"
+                />
+                <Button
+                  size="xs"
+                  variant="primary"
+                  onClick={() => executeStockBacktest(backtestStockTarget, 'custom')}
+                  loading={backtesting}
+                >
+                  回測
+                </Button>
+              </div>
+            )}
+
+            <div className="flex items-center gap-2">
+              <span className="text-slate-500 dark:text-slate-400 text-[11px]">
+                融合模式: <b>{logicMode}</b>
+              </span>
+              <Button
+                size="xs"
+                variant="secondary"
+                onClick={() => executeStockBacktest(backtestStockTarget, backtestRangeType)}
+                loading={backtesting}
+              >
+                <RefreshCw className="w-3 h-3 mr-1" />
+                重新運算
+              </Button>
+            </div>
+          </div>
+
+          {/* Loading Indicator */}
+          {backtesting && (
+            <div className="py-12 flex flex-col items-center justify-center gap-2 text-slate-500">
+              <RefreshCw className="w-6 h-6 animate-spin text-indigo-500" />
+              <span className="text-xs">正在逐日滾動計算該標的進出場訊號與前向結算...</span>
+            </div>
+          )}
+
+          {/* Results Display */}
+          {!backtesting && backtestResult && (
+            <div className="space-y-4">
+              {/* Metrics Grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700">
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400">總累積報酬率</div>
+                  <div
+                    className={`text-lg font-mono font-bold mt-0.5 ${
+                      backtestResult.totalReturn >= 0 ? 'text-rose-500' : 'text-emerald-500'
+                    }`}
+                  >
+                    {fmtPercent(backtestResult.totalReturn * 100)}
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700">
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400">年化報酬率</div>
+                  <div
+                    className={`text-lg font-mono font-bold mt-0.5 ${
+                      backtestResult.annualizedReturn >= 0 ? 'text-rose-500' : 'text-emerald-500'
+                    }`}
+                  >
+                    {fmtPercent(backtestResult.annualizedReturn * 100)}
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700">
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400">勝率 / 交易次數</div>
+                  <div className="text-lg font-mono font-bold mt-0.5 text-slate-900 dark:text-slate-100">
+                    {fmtPercent(backtestResult.winRate * 100)}
+                    <span className="text-xs font-normal text-slate-400 ml-1.5">
+                      ({backtestResult.totalTrades}次)
+                    </span>
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700">
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400">最大回撤 / 夏普比率</div>
+                  <div className="text-lg font-mono font-bold mt-0.5 text-slate-900 dark:text-slate-100">
+                    <span className="text-rose-500">
+                      -{fmtPercent(backtestResult.maxDrawdown * 100)}
+                    </span>
+                    <span className="text-xs font-normal text-slate-400 ml-1.5">
+                      (SR: {backtestResult.sharpeRatio?.toFixed(2) || '0.00'})
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Trades Table */}
+              <div>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-xs font-bold text-slate-900 dark:text-slate-100">
+                    歷史交易進出場歷程 ({backtestResult.trades?.length || 0} 筆)
+                  </div>
+                  <div className="text-[11px] text-slate-400">
+                    期初本金: {fmtCurrency(backtestResult.initialCapital)} ➔ 期末資產: {fmtCurrency(backtestResult.finalCapital)}
+                  </div>
+                </div>
+
+                <div className="max-h-60 overflow-y-auto rounded-xl border border-slate-200 dark:border-slate-700">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead className="sticky top-0 bg-slate-100 dark:bg-slate-800 text-[11px] text-slate-500 dark:text-slate-400 font-semibold border-b border-slate-200 dark:border-slate-700">
+                      <tr>
+                        <th className="py-2 px-3">買進日期</th>
+                        <th className="py-2 px-3">買進價格</th>
+                        <th className="py-2 px-3">賣出日期</th>
+                        <th className="py-2 px-3">賣出價格</th>
+                        <th className="py-2 px-3">持有天數</th>
+                        <th className="py-2 px-3 text-right">單筆獲利</th>
+                        <th className="py-2 px-3 text-right">報酬率</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {backtestResult.trades && backtestResult.trades.length > 0 ? (
+                        backtestResult.trades.map((t, idx) => {
+                          const isProfit = t.profitLoss >= 0;
+                          return (
+                            <tr key={idx} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 font-mono">
+                              <td className="py-2 px-3 text-slate-600 dark:text-slate-300">{t.buyDate}</td>
+                              <td className="py-2 px-3">{fmtCurrency(t.buyPrice, 2)}</td>
+                              <td className="py-2 px-3 text-slate-600 dark:text-slate-300">{t.sellDate || '尚未出場'}</td>
+                              <td className="py-2 px-3">{t.sellPrice ? fmtCurrency(t.sellPrice, 2) : '-'}</td>
+                              <td className="py-2 px-3 text-slate-500">{t.days} 天</td>
+                              <td className={`py-2 px-3 text-right font-bold ${isProfit ? 'text-rose-500' : 'text-emerald-500'}`}>
+                                {fmtCurrency(t.profitLoss)}
+                              </td>
+                              <td className={`py-2 px-3 text-right font-bold ${isProfit ? 'text-rose-500' : 'text-emerald-500'}`}>
+                                {fmtPercent(t.return * 100)}
+                              </td>
+                            </tr>
+                          );
+                        })
+                      ) : (
+                        <tr>
+                          <td colSpan={7} className="py-8 text-center text-slate-400 text-xs">
+                            此時間區間內未觸發任何完整進出場交易（可嘗試切換更長期間或調整為 OR 邏輯模式）
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
       </Modal>
     </div>
   );

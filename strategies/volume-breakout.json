@@ -19,9 +19,9 @@
   ],
   "backtest": {
     "startDate": "2023-01-01",
-    "endDate": "2026-12-31",
-    "initialCapital": 3000000,
-    "positionSize": 3000000,
+    "endDate": null,
+    "initialCapital": 1000000,
+    "positionSize": 1000000,
     "commissionRate": 0.001425,
     "taxRate": 0.003
   },
