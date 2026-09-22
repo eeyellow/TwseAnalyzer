@@ -368,13 +368,13 @@ public class HistoricalReplayService
             ? Math.Round((double)totalRawWins / signals.Count * 100.0, 1)
             : 0;
 
-        double avgRet1D = cleanSignals.Any() ? Math.Round((double)cleanSignals.Average(s => s.Return1D) * 100.0, 2) : 0;
+        double avgRet1D = cleanSignals.Any() ? Math.Round((double)(cleanSignals.Average(s => s.Return1D) ?? 0m) * 100.0, 2) : 0;
         double avgRet3D = cleanSignals.Where(s => s.Return3D.HasValue).DefaultIfEmpty().Average(s => (double)(s?.Return3D ?? 0)) * 100.0;
         double avgRet5D = cleanSignals.Where(s => s.Return5D.HasValue).DefaultIfEmpty().Average(s => (double)(s?.Return5D ?? 0)) * 100.0;
 
         // 計算整體獲利因子 (Profit Factor)
-        var grossProfit = cleanSignals.Where(s => (s.Return5D ?? s.Return1D) > 0).Sum(s => (double)(s.Return5D.HasValue ? s.Return5D.Value : s.Return1D));
-        var grossLoss = Math.Abs(cleanSignals.Where(s => (s.Return5D ?? s.Return1D) < 0).Sum(s => (double)(s.Return5D.HasValue ? s.Return5D.Value : s.Return1D)));
+        var grossProfit = cleanSignals.Where(s => (s.Return5D ?? s.Return1D) > 0).Sum(s => (double)(s.Return5D ?? s.Return1D ?? 0m));
+        var grossLoss = Math.Abs(cleanSignals.Where(s => (s.Return5D ?? s.Return1D) < 0).Sum(s => (double)(s.Return5D ?? s.Return1D ?? 0m)));
         double overallProfitFactor = grossLoss > 0.0001 ? Math.Round(grossProfit / grossLoss, 2) : (grossProfit > 0 ? 99.0 : 1.0);
 
         // 2. 歷年逐季勝率走勢統計 (Quarterly Performance Trends)
@@ -405,12 +405,12 @@ public class HistoricalReplayService
             double qCleanWinRate = qClean.Any() ? Math.Round((double)qWins / qClean.Count * 100.0, 1) : 0;
             double qRawWinRate = qSignals.Any() ? Math.Round((double)qRawWins / qSignals.Count * 100.0, 1) : 0;
 
-            double qRet1D = qClean.Any() ? Math.Round((double)qClean.Average(s => s.Return1D) * 100.0, 2) : 0;
+            double qRet1D = qClean.Any() ? Math.Round((double)(qClean.Average(s => s.Return1D) ?? 0m) * 100.0, 2) : 0;
             double qRet3D = qClean.Where(s => s.Return3D.HasValue).DefaultIfEmpty().Average(s => (double)(s != null && s.Return3D.HasValue ? s.Return3D.Value : 0)) * 100.0;
             double qRet5D = qClean.Where(s => s.Return5D.HasValue).DefaultIfEmpty().Average(s => (double)(s != null && s.Return5D.HasValue ? s.Return5D.Value : 0)) * 100.0;
 
-            var qProfit = qClean.Where(s => (s.Return5D ?? s.Return1D) > 0).Sum(s => (double)(s.Return5D.HasValue ? s.Return5D.Value : s.Return1D));
-            var qLoss = Math.Abs(qClean.Where(s => (s.Return5D ?? s.Return1D) < 0).Sum(s => (double)(s.Return5D.HasValue ? s.Return5D.Value : s.Return1D)));
+            var qProfit = qClean.Where(s => (s.Return5D ?? s.Return1D) > 0).Sum(s => (double)(s.Return5D ?? s.Return1D ?? 0m));
+            var qLoss = Math.Abs(qClean.Where(s => (s.Return5D ?? s.Return1D) < 0).Sum(s => (double)(s.Return5D ?? s.Return1D ?? 0m)));
             double qProfitFactor = qLoss > 0.0001 ? Math.Round(qProfit / qLoss, 2) : (qProfit > 0 ? 10.0 : 1.0);
 
             // 判斷該季度市場特徵標籤
@@ -453,7 +453,7 @@ public class HistoricalReplayService
                 double rawWinRate = stSignals.Any() ? Math.Round((double)stSignals.Count(s => s.IsWin == 1) / stSignals.Count * 100.0, 1) : 0;
 
                 double avgPnl = stClean.Any()
-                    ? Math.Round((double)stClean.Average(s => s.Return5D.HasValue ? s.Return5D.Value : s.Return1D) * 100.0, 2)
+                    ? Math.Round((double)(stClean.Average(s => s.Return5D ?? s.Return1D) ?? 0m) * 100.0, 2)
                     : 0;
 
                 // 動態權重
@@ -472,7 +472,7 @@ public class HistoricalReplayService
                     WinCount = cleanWins,
                     WinRate = (decimal)cleanWinRate,
                     RawWinRate = (decimal)rawWinRate,
-                    AvgReturn1D = (decimal)(stClean.Any() ? stClean.Average(s => s.Return1D) * 100.0m : 0m),
+                    AvgReturn1D = (decimal)(stClean.Any() ? (stClean.Average(s => s.Return1D) ?? 0m) * 100.0m : 0m),
                     AvgReturn3D = (decimal)avgPnl,
                     ProfitFactor = (decimal)overallProfitFactor,
                     AdaptiveWeight = weight,
@@ -492,7 +492,7 @@ public class HistoricalReplayService
                 var list = g.ToList();
                 int wins = list.Count(s => s.IsWin == 1);
                 double winRate = Math.Round((double)wins / list.Count * 100.0, 1);
-                double avgPnl = Math.Round((double)list.Average(s => s.Return5D.HasValue ? s.Return5D.Value : s.Return1D) * 100.0, 2);
+                double avgPnl = Math.Round((double)(list.Average(s => s.Return5D ?? s.Return1D) ?? 0m) * 100.0, 2);
 
                 allStocks.TryGetValue(g.Key.StockCode, out var sInfo);
                 var pnlFactor = Math.Min(avgPnl / 5.0, 1.0) * 40.0;
@@ -511,7 +511,7 @@ public class HistoricalReplayService
                     SampleCount = list.Count,
                     WinCount = wins,
                     WinRate = (decimal)winRate,
-                    AvgReturn1D = (decimal)(list.Average(s => s.Return1D) * 100.0m),
+                    AvgReturn1D = (decimal)((list.Average(s => s.Return1D) ?? 0m) * 100.0m),
                     ProfitFactor = (decimal)(pnlFactor / 10.0),
                     AffinityScore = (decimal)score,
                     FitLevel = fitLevel,
@@ -532,7 +532,7 @@ public class HistoricalReplayService
                 var list = g.ToList();
                 int wins = list.Count(s => s.IsWin == 1);
                 double winRate = Math.Round((double)wins / list.Count * 100.0, 1);
-                double avgPnl = Math.Round((double)list.Average(s => s.Return5D.HasValue ? s.Return5D.Value : s.Return1D) * 100.0, 2);
+                double avgPnl = Math.Round((double)(list.Average(s => s.Return5D ?? s.Return1D) ?? 0m) * 100.0, 2);
 
                 string rec = "Suitable";
                 if (winRate >= 60 && avgPnl >= 1.5) rec = "HighlySuitable";
@@ -545,7 +545,7 @@ public class HistoricalReplayService
                     SampleCount = list.Count,
                     WinCount = wins,
                     WinRate = (decimal)winRate,
-                    AvgReturn1D = (decimal)(list.Average(s => s.Return1D) * 100.0m),
+                    AvgReturn1D = (decimal)((list.Average(s => s.Return1D) ?? 0m) * 100.0m),
                     ProfitFactor = (decimal)(Math.Max(0.5, 1.0 + avgPnl / 10.0)),
                     FitRecommendation = rec
                 };
