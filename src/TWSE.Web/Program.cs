@@ -76,8 +76,30 @@ app.UseDefaultFiles();
 app.UseStaticFiles();
 app.MapControllers();
 
-// SPA fallback: serve index.html for any non-API routes
-app.MapFallbackToFile("index.html");
+// SPA fallback: serve index.html for any non-API routes, but return 404 JSON for unmatched /api routes
+app.MapFallback(async context =>
+{
+    if (context.Request.Path.StartsWithSegments("/api"))
+    {
+        context.Response.StatusCode = StatusCodes.Status404NotFound;
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsync("{\"error\": \"API endpoint not found\", \"path\": \"" + context.Request.Path + "\"}");
+        return;
+    }
+
+    var webRoot = app.Environment.WebRootPath ?? Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
+    var indexPath = Path.Combine(webRoot, "index.html");
+    if (File.Exists(indexPath))
+    {
+        context.Response.ContentType = "text/html";
+        await context.Response.SendFileAsync(indexPath);
+    }
+    else
+    {
+        context.Response.StatusCode = StatusCodes.Status404NotFound;
+        await context.Response.WriteAsync("Frontend build index.html not found.");
+    }
+});
 
 // Ensure database tables are created
 using (var scope = app.Services.CreateScope())
