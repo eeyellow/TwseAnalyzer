@@ -5,14 +5,15 @@ on:
     branches:
       - master
     tags:
-      - 'v*.*.*'
-      - 'v*.*'
+      - 'v*'
+      - '[0-9]+.*'
   workflow_dispatch:
     inputs:
       custom_tag:
-        description: '自訂額外 Tag (例如 1.5，留空則僅產出 latest 與 sha)'
+        description: '自訂額外 Tag (例如 v1.6，留空則依觸發條件產生 latest 或 tag)'
         required: false
         default: ''
+
 
 jobs:
   docker:
@@ -39,14 +40,13 @@ jobs:
         with:
           images: eeyellow/twse
           tags: |
-            # master 分支推動時固定打上 latest
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
-            # Git Tag 推動時自動擷取版本號 (例如 v1.5 -> 1.5)
-            type=semver,pattern={{version}}
-            # 每次 build 都保留 short SHA 作為追溯版本 (例如 eeyellow/twse:sha-xxxxxxx)
-            type=sha,prefix=sha-,format=short
+            # master 推送或建立 tag 時，皆同步更新 latest
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/') }}
+            # 推送 Git Tag 時，直接使用原始 Tag 名稱 (例如 v1.6)
+            type=ref,event=tag
             # 手動觸發時若有輸入 custom_tag
             type=raw,value=${{ github.event.inputs.custom_tag }},enable=${{ github.event.inputs.custom_tag != '' }}
+
 
       - name: 建置並推送映像檔
         uses: docker/build-push-action@v6
